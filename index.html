@@ -63,7 +63,12 @@
   /* ---------- conversation ---------- */
   .turn{display:flex;margin-bottom:18px}
   .turn.user{justify-content:flex-end}
-  .bubble{max-width:82%;padding:13px 17px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word}
+  /* No percentage max-width here. The column that holds this bubble is sized BY
+     the bubble, so a percentage cap is circular: a long message hits the
+     column's own 82% first and looks fine, but a short one collapses to the
+     width of its widest letter. "yes" rendered as three stacked characters on
+     30 July. The column below carries the cap; the bubble just fills it. */
+  .bubble{max-width:100%;padding:13px 17px;border-radius:16px;white-space:pre-wrap;overflow-wrap:break-word}
   .turn.user .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:5px}
   .turn.assistant .bubble{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:5px}
   .stamp{font-size:11.5px;color:var(--ink-3);margin:5px 3px 0;letter-spacing:.01em}
@@ -510,7 +515,12 @@
     return h;
   }
 
-  function renderStream(pending) {
+  // keepScroll: hold the reader where they are instead of jumping to the
+  // bottom. A new message should pull the view down; deciding on a card should
+  // not. Without this, approving the third card of six threw the page to the
+  // end of the transcript and the next card had to be scrolled back to - once
+  // per decision, every time. Found by the product owner, 30 July.
+  function renderStream(pending, keepScroll) {
     var html = "", i, t;
     if (!turns.length && !pending && !cards.length) {
       $("stream").innerHTML =
@@ -542,9 +552,10 @@
     if (closedNotice) {
       html += '<div class="system">This thread is closed. Your next message starts a new one.</div>';
     }
-    $("stream").innerHTML = html;
     var p = $("paneChat");
-    p.scrollTop = p.scrollHeight;
+    var was = p.scrollTop;
+    $("stream").innerHTML = html;
+    p.scrollTop = keepScroll ? was : p.scrollHeight;
   }
 
   function systemNote(text, bad) {
@@ -727,15 +738,15 @@
           closedNotice = true;
           setState("closed", true);
         }
-        renderStream(false);
+        renderStream(false, true);
       } else {
         cardError[id] = explainDecision(d);
-        renderStream(false);
+        renderStream(false, true);
       }
     }).catch(function (err) {
       setCardBusy(id, false);
       cardError[id] = "Could not reach the server. Nothing was changed. (" + err.message + ")";
-      renderStream(false);
+      renderStream(false, true);
     });
   }
 
@@ -936,8 +947,8 @@
     var b = e.target.closest ? e.target.closest("[data-act]") : null;
     if (!b) return;
     var id = b.getAttribute("data-id"), act = b.getAttribute("data-act");
-    if (act === "edit")        { editingId = id; delete cardError[id]; renderStream(false); }
-    else if (act === "cancel") { editingId = null; renderStream(false); }
+    if (act === "edit")        { editingId = id; delete cardError[id]; renderStream(false, true); }
+    else if (act === "cancel") { editingId = null; renderStream(false, true); }
     else if (act === "approve") decide(id, "approve");
     else if (act === "save")    decide(id, "save");
     else if (act === "reject")  decide(id, "reject");
