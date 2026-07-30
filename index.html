@@ -144,6 +144,50 @@
   .prop-err{margin-top:11px;font-size:13.5px;color:var(--warn);background:var(--warn-soft);
             border:1px solid #f0d5d0;border-radius:7px;padding:9px 11px}
 
+  /* ---------- the approval conversation (Session 7, blueprint 8.6) ---------- */
+  /* The shape, shown once, before any question. One line: how many changes,
+     across how many records, and whether any record is new. */
+  .shape{background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:var(--radius);
+         padding:14px 17px;margin:6px 0 14px}
+  .shape p{margin:0;font-size:15px;color:var(--ink)}
+  .shape .esc{margin-top:11px}
+  .btn-esc{background:transparent;color:var(--accent);border-color:var(--accent-line);
+           padding:7px 14px;font-size:14px;font-weight:550;background:#fff}
+  .btn-esc:hover{background:var(--accent);color:#fff}
+  .shape .noesc{margin-top:9px;font-size:12.5px;color:var(--ink-2)}
+
+  /* What has already been settled, one line each. Deliberately quiet: it is
+     there so nothing disappears, not to be read again. */
+  .settled{margin:0 0 14px;padding:0;list-style:none}
+  .settled li{font-size:13.5px;color:var(--ink-2);padding:5px 0 5px 22px;position:relative;
+              border-bottom:1px solid var(--line)}
+  .settled li:last-child{border-bottom:none}
+  .settled li .mk{position:absolute;left:0;top:5px;font-weight:700}
+  .settled li.yes .mk{color:var(--accent)}
+  .settled li.no .mk{color:var(--warn)}
+
+  /* One question. */
+  .q{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+     padding:18px 20px;margin-bottom:12px}
+  .q.parent{border-color:var(--accent-line);border-left:4px solid var(--accent)}
+  .q.busy{opacity:.5}
+  .q-kind{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:650;
+          color:var(--ink-3);margin-bottom:7px}
+  .q h3{margin:0 0 8px;font-size:17px;font-weight:600;letter-spacing:-0.01em}
+  .q-why{margin:0 0 14px;font-size:14px;color:var(--ink-2)}
+  .q-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn-alt{background:#fff;color:var(--ink);border-color:var(--line);padding:7px 14px;font-size:14px}
+  .btn-alt:hover{border-color:var(--accent);color:var(--accent)}
+  .remaining{font-size:12.5px;color:var(--ink-3);margin:2px 0 16px}
+  .wrap{background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:var(--radius);
+        padding:14px 17px;margin:6px 0 14px;font-size:14.5px;color:var(--ink)}
+  .dlbl{font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
+        font-weight:600;margin:12px 0 3px}
+  .q .detail{margin-bottom:12px}
+  .evlist{margin:0;padding:0;list-style:none}
+  .evlist li{margin-bottom:5px}
+  .evlist li:last-child{margin-bottom:0}
+
   /* ---------- composer ---------- */
   .composer{border-top:1px solid var(--line);background:var(--card);padding:14px 24px 18px}
   .composer-inner{max-width:720px;margin:0 auto;display:flex;gap:10px;align-items:flex-end}
@@ -260,6 +304,18 @@
   var recordsLoaded = false;
   var editingId = null;    // the card currently open for editing, if any
   var cardError = {};      // id -> a sentence saying why the last decision failed
+
+  // --- Session 7, the approval conversation (blueprint 8.6) -----------------
+  // Decisions are asked as a TREE, not a list. Whether a record should exist is
+  // the parent of every change attached to it, so it is asked first: asked
+  // flat, the owner is answering questions about a partner whose existence is
+  // still undecided. These three hold the answers to the parent questions.
+  var attached = {};       // group key -> the record id its changes will land on
+  var skipped  = {};       // group key -> true, the whole branch was declined
+  var pickingFor = null;   // group key whose "one we already have" picker is open
+  var groupError = {};     // group key -> why the last parent answer failed
+  var notices = [];        // sentences the flow has said out loud, in order
+  var escapeBusy = false;
 
   // ---------------------------------------------------------------------------
   // Session storage — unchanged from Session 4b. Inherited, not rebuilt.
@@ -450,68 +506,267 @@
     return h + "</div>";
   }
 
-  function cardHtml(c) {
-    var unmatched = c.entity_resolution !== "exact_match" && !c.resolved_object_id;
-    var decided = c.status !== "pending";
-    var h = '<div class="prop' + (decided ? " done" : "") + '" data-card="' + escapeHtml(c.id) + '">';
+  // ---------------------------------------------------------------------------
+  // THE TREE. Blueprint 8.6, and the product owner's own point rather than
+  // Claude's: risk-first ordering assumed the decisions were independent, and
+  // they are not. Whether a record should exist is the PARENT of every change
+  // attached to it. One answer to a parent can prune a whole branch.
+  //
+  // The grouping key is the RESOLVED record where there is one, so two deals
+  // with the same partner are two groups without anyone reasoning about it, and
+  // the unresolved name where there is not.
+  // ---------------------------------------------------------------------------
+  function groupKeyOf(c) {
+    if (c.resolved_object_id) return "obj:" + c.resolved_object_id;
+    return "new:" + String(c.entity_name || "").trim().toLowerCase() +
+           "|" + String(c.entity_type || "partner").toLowerCase();
+  }
+  function riskRank(r) { return r === "high" ? 1 : r === "medium" ? 2 : 3; }
 
-    h += '<div class="prop-tags">' +
-           '<span class="tag risk-' + escapeHtml(c.risk) + '">' + escapeHtml(c.risk) + " risk</span>" +
-           '<span class="tag">' + escapeHtml(titleCase(c.type)) + "</span>" +
-           (unmatched ? '<span class="tag unmatched">no matching record</span>' : "") +
-         "</div>";
+  function buildGroups() {
+    var map = {}, order = [], i, c, k, g;
+    for (i = 0; i < cards.length; i++) {
+      c = cards[i]; k = groupKeyOf(c);
+      if (!map[k]) {
+        map[k] = { key: k, isNew: !c.resolved_object_id,
+                   name: c.resolved_object_name || c.entity_name || "an unnamed record",
+                   type: c.entity_type || "partner", items: [], minSeq: 99999, minRisk: 9 };
+        order.push(map[k]);
+      }
+      g = map[k];
+      g.items.push(c);
+      if ((c.seq || 0) < g.minSeq) g.minSeq = c.seq || 0;
+      if (riskRank(c.risk) < g.minRisk) g.minRisk = riskRank(c.risk);
+    }
+    for (i = 0; i < order.length; i++) {
+      // Risk ordering (8.4) is not withdrawn - it is demoted to operating
+      // INSIDE a group, which is the only place the items are independent.
+      order[i].items.sort(function (a, b) {
+        return riskRank(a.risk) - riskRank(b.risk) || (a.seq || 0) - (b.seq || 0);
+      });
+    }
+    // Dependencies first: a group whose record does not exist yet is asked
+    // before any group whose record does.
+    order.sort(function (a, b) {
+      if (a.isNew !== b.isNew) return a.isNew ? -1 : 1;
+      if (a.isNew) return a.minSeq - b.minSeq;
+      return a.minRisk - b.minRisk || a.minSeq - b.minSeq;
+    });
+    return order;
+  }
 
-    h += '<p class="ev"><span class="lbl">You said</span>' + escapeHtml(c.evidence || "") + "</p>";
-    h += '<div class="what">' + escapeHtml(whatLine(c)) + "</div>";
+  function groupPending(g) {
+    var n = 0, i;
+    for (i = 0; i < g.items.length; i++) if (g.items[i].status === "pending") n++;
+    return n;
+  }
+
+  // The one question currently on screen, or null when everything is settled.
+  function currentStep() {
+    var gs = buildGroups(), i, j, g;
+    for (i = 0; i < gs.length; i++) {
+      g = gs[i];
+      if (!groupPending(g)) continue;
+      if (skipped[g.key]) continue;
+      if (g.isNew && !attached[g.key]) return { kind: "parent", group: g };
+      for (j = 0; j < g.items.length; j++) {
+        if (g.items[j].status === "pending") return { kind: "item", card: g.items[j], group: g };
+      }
+    }
+    return null;
+  }
+
+  // Where an approval should land. A change that resolved to a record goes
+  // there; a change under a parent question goes to whatever that question was
+  // answered with. Never a guess.
+  function targetFor(c) {
+    return c.resolved_object_id || attached[groupKeyOf(c)] || null;
+  }
+
+  function pendingCount() {
+    var n = 0, i;
+    for (i = 0; i < cards.length; i++) if (cards[i].status === "pending") n++;
+    return n;
+  }
+
+  // REFUSAL S7-11, agreed with the product owner on 30 July. The one-click
+  // answer exists so a ROUTINE set costs one answer. A set containing a record
+  // that does not exist yet, or a status change to Won or Dropped, is not
+  // routine - and one click on a summary line is not a decision about either.
+  function escapeAllowed() {
+    var gs = buildGroups(), i, j;
+    if (pendingCount() < 2) return false;
+    for (i = 0; i < gs.length; i++) {
+      if (gs[i].isNew && groupPending(gs[i])) return false;
+      for (j = 0; j < gs[i].items.length; j++) {
+        if (gs[i].items[j].status === "pending" && gs[i].items[j].risk === "high") return false;
+      }
+    }
+    return true;
+  }
+  function escapeBlockedBecause() {
+    var gs = buildGroups(), i, j;
+    for (i = 0; i < gs.length; i++) {
+      if (gs[i].isNew && groupPending(gs[i]))
+        return "There is a record here that does not exist yet, so there is nothing to say " +
+               "“it all looks fine” about in one go.";
+      for (j = 0; j < gs[i].items.length; j++)
+        if (gs[i].items[j].status === "pending" && gs[i].items[j].risk === "high")
+          return "One of these is a high-risk change, so it gets asked on its own.";
+    }
+    return "";
+  }
+
+  // The shape, shown once, before the questions start. Blueprint 8.6: how many
+  // changes, across how many records, and whether any record is new.
+  function shapeHtml() {
+    var gs = buildGroups(), newOnes = [], i;
+    for (i = 0; i < gs.length; i++) if (gs[i].isNew) newOnes.push(gs[i].name);
+    var line = cards.length + " change" + (cards.length === 1 ? "" : "s") +
+               ", across " + gs.length + " record" + (gs.length === 1 ? "" : "s") + ".";
+    if (newOnes.length === 1) {
+      line += " One of them — " + newOnes[0] + " — isn't in your records yet.";
+    } else if (newOnes.length > 1) {
+      line += " " + newOnes.length + " of them aren't in your records yet: " + newOnes.join(", ") + ".";
+    }
+    var h = '<div class="shape"><p>' + escapeHtml(line) + "</p>";
+    if (pendingCount() === 0) {
+      h += '<p class="noesc">All handled.</p>';
+    } else if (escapeAllowed()) {
+      h += '<div class="esc"><button class="btn-esc" data-act="escape">It all looks fine — do the lot</button></div>';
+    } else if (pendingCount() > 1) {
+      h += '<p class="noesc">' + escapeHtml(escapeBlockedBecause()) + "</p>";
+    }
+    return h + "</div>";
+  }
+
+  // Everything already decided, one quiet line each, so nothing disappears.
+  function settledHtml() {
+    var gs = buildGroups(), out = "", i, j, c;
+    for (i = 0; i < gs.length; i++) {
+      for (j = 0; j < gs[i].items.length; j++) {
+        c = gs[i].items[j];
+        if (c.status === "pending") continue;
+        var yes = c.status === "applied";
+        out += '<li class="' + (yes ? "yes" : "no") + '"><span class="mk">' + (yes ? "✓" : "✕") +
+               "</span>" + escapeHtml(whatLine(c)) +
+               (yes ? " — done." : " — dropped, nothing changed.") + "</li>";
+      }
+    }
+    return out ? '<ul class="settled">' + out + "</ul>" : "";
+  }
+
+  // A parent question. Three answers, and "add them" is a real one for the
+  // first time - Session 6 found the commoner case is a partner who is simply
+  // ABSENT, where the only outcomes were reject or mis-attach.
+  function parentHtml(g) {
+    var n = groupPending(g);
+    var kinds = {}, i, list = [];
+    for (i = 0; i < g.items.length; i++)
+      if (g.items[i].status === "pending") kinds[g.items[i].type] = (kinds[g.items[i].type] || 0) + 1;
+    Object.keys(kinds).forEach(function (k) {
+      list.push(kinds[k] + " " + (k === "property_update" ? "record change" : k) + (kinds[k] > 1 ? "s" : ""));
+    });
+
+    var h = '<div class="q parent" data-group="' + escapeHtml(g.key) + '">' +
+            '<div class="q-kind">First, because everything else here depends on it</div>' +
+            "<h3>" + escapeHtml(g.name) + " isn't in your records.</h3>" +
+            '<p class="q-why">' + n + " of the proposed changes hang off it" +
+            (list.length ? " (" + escapeHtml(list.join(", ")) + ")" : "") +
+            ". Whether it should exist decides all of them, so it is worth answering first.</p>";
+
+    if (pickingFor === g.key) {
+      h += '<div class="pick"><select data-gpick="' + escapeHtml(g.key) + '">' +
+           candidateOptions(null) + "</select></div>" +
+           '<div class="q-actions">' +
+           '<button class="btn-approve" data-gact="pickconfirm" data-g="' + escapeHtml(g.key) + '">Use this record</button>' +
+           '<button class="btn-quiet" data-gact="pickcancel" data-g="' + escapeHtml(g.key) + '">Back</button></div>';
+    } else {
+      h += '<div class="q-actions">' +
+           '<button class="btn-approve" data-gact="add" data-g="' + escapeHtml(g.key) + '">Add them</button>' +
+           '<button class="btn-alt" data-gact="pick" data-g="' + escapeHtml(g.key) + '">It’s one we already have…</button>' +
+           '<button class="btn-reject" data-gact="skip" data-g="' + escapeHtml(g.key) + '">Skip anything about them</button>' +
+           "</div>";
+    }
+    if (groupError[g.key]) h += '<div class="prop-err">' + escapeHtml(groupError[g.key]) + "</div>";
+    return h + "</div>";
+  }
+
+  // One item question. The card content is Session 6's, unchanged in order -
+  // evidence first, because everything else on it is a claim about that. What
+  // changed is that there is exactly one of them on screen.
+  function itemHtml(c, g) {
+    var h = '<div class="q" data-card="' + escapeHtml(c.id) + '">' +
+            '<div class="q-kind">' + escapeHtml(titleCase(c.type)) +
+            " · " + escapeHtml(c.risk) + " risk" +
+            ((c.bundled_from || 1) > 1 ? " · " + c.bundled_from + " things you said" : "") +
+            "</div>";
+
+    h += "<h3>" + escapeHtml(whatLine(c)) + "</h3>";
+
+    var facts = Array.isArray(c.evidence_facts) && c.evidence_facts.length
+                  ? c.evidence_facts : (c.evidence ? [c.evidence] : []);
+    // A <div>, not a <p>. A <ul> inside a <p> is invalid HTML and the browser
+    // closes the paragraph early, which silently drops the quote's left rule -
+    // the one piece of styling whose whole job is to say "these are your words,
+    // not ours". Seen in the browser on 30 July before it shipped.
+    if (facts.length) {
+      h += '<div class="ev"><span class="lbl">' +
+           (facts.length > 1 ? "The " + facts.length + " things you said" : "You said") + "</span>";
+      if (facts.length === 1) h += escapeHtml(facts[0]);
+      else {
+        h += '<ul class="evlist">';
+        for (var i = 0; i < facts.length; i++) h += "<li>" + escapeHtml(facts[i]) + "</li>";
+        h += "</ul>";
+      }
+      h += "</div>";
+    }
 
     var d = detailLine(c);
-    if (d) h += '<div class="detail">' + escapeHtml(d) + "</div>";
+    if (d) {
+      if (c.type === "note") h += '<div class="dlbl">The note it would add</div>';
+      h += '<div class="detail">' + escapeHtml(d) + "</div>";
+    }
 
-    if (unmatched) {
-      h += '<div class="onto">No record called <b>' + escapeHtml(c.entity_name) +
-           "</b> exists yet, so this is not attached to anything.</div>";
-      if (!decided) {
-        h += '<div class="pick"><select data-pick="' + escapeHtml(c.id) + '">' +
-             candidateOptions(null) + "</select></div>";
-      }
+    var t = targetFor(c);
+    if (t) {
+      var nm = c.resolved_object_name;
+      if (!nm) { for (var j = 0; j < candidates.length; j++) if (candidates[j].id === t) nm = candidates[j].name; }
+      h += '<div class="onto">On <b>' + escapeHtml(nm || g.name) + "</b></div>";
     } else {
-      h += '<div class="onto">On <b>' + escapeHtml(targetName(c)) + "</b></div>";
+      // Reachable only if the tree were bypassed. Refusal S4 is the backstop
+      // underneath it in the database, and this is the sentence above it.
+      h += '<div class="onto">This is not attached to any record, so approving it would change nothing.</div>';
     }
 
     if (c.impact) h += '<div class="impact">' + escapeHtml(c.impact) + "</div>";
+    if (editingId === c.id) h += editorHtml(c);
 
-    if (editingId === c.id && !decided) h += editorHtml(c);
-
-    h += '<div class="prop-actions">';
-    if (decided) {
-      h += '<span class="verdict"><b>' +
-           (c.status === "applied" ? "Approved" : c.status === "rejected" ? "Rejected" : titleCase(c.status)) +
-           "</b>" + (c.status === "applied" ? " — your records have changed." : " — nothing was changed.") +
-           "</span>";
-    } else if (editingId === c.id) {
+    h += '<div class="q-actions">';
+    if (editingId === c.id) {
       h += '<button class="btn-approve" data-act="save" data-id="' + escapeHtml(c.id) + '">Save and approve</button>' +
            '<button class="btn-quiet" data-act="cancel" data-id="' + escapeHtml(c.id) + '">Cancel</button>';
     } else {
       h += '<button class="btn-approve" data-act="approve" data-id="' + escapeHtml(c.id) + '">Approve</button>' +
-           '<button class="btn-quiet" data-act="edit" data-id="' + escapeHtml(c.id) + '">Edit</button>' +
+           '<button class="btn-alt" data-act="edit" data-id="' + escapeHtml(c.id) + '">Edit</button>' +
            '<button class="btn-reject" data-act="reject" data-id="' + escapeHtml(c.id) + '">Reject</button>';
     }
     h += "</div>";
-
     if (cardError[c.id]) h += '<div class="prop-err">' + escapeHtml(cardError[c.id]) + "</div>";
-
     return h + "</div>";
   }
 
   function cardsHtml() {
     if (!cards.length) return "";
-    var pending = 0, i;
-    for (i = 0; i < cards.length; i++) if (cards[i].status === "pending") pending++;
-    var h = '<div class="prop-head"><h3>Proposed changes</h3>' +
-            '<span class="count">' + cards.length + " in all" +
-            (pending ? ", " + pending + " still yours to decide" : ", all handled") + "</span>" +
-            '<span class="why">Nothing changes until you approve it</span></div>';
-    for (i = 0; i < cards.length; i++) h += cardHtml(cards[i]);
+    var h = shapeHtml() + settledHtml(), i;
+    for (i = 0; i < notices.length; i++) h += '<div class="wrap">' + escapeHtml(notices[i]) + "</div>";
+
+    var step = currentStep();
+    if (!step) return h;
+
+    var left = pendingCount();
+    h += '<p class="remaining">' + left + " left to decide.</p>";
+    h += step.kind === "parent" ? parentHtml(step.group) : itemHtml(step.card, step.group);
     return h;
   }
 
@@ -593,8 +848,12 @@
         convId = d.conversation_id;
         closedNotice = !!d.closed;
         setState(d.status, d.closed);
-        // A new thread starts with no proposals of its own.
-        if (!d.resumed) { cards = []; }
+        // A new thread starts with no proposals of its own, and with none of
+        // the previous thread's answers to parent questions.
+        if (!d.resumed) {
+          cards = []; attached = {}; skipped = {}; pickingFor = null;
+          groupError = {}; notices = [];
+        }
         generating = d.generate === true;
         renderStream(false);
         if (d.generate === true) askForProposals(d.conversation_id);
@@ -702,13 +961,12 @@
       fn = "chat_reject_record_update";
       args = { p_record_update_id: id };
     } else {
-      var picked = null, ed = null;
-      if (mode === "save") {
-        ed = readEditor(c);
-      } else {
-        var sel = document.querySelector('[data-pick="' + id + '"]');
-        picked = sel && sel.value ? sel.value : null;
-      }
+      var ed = null;
+      if (mode === "save") ed = readEditor(c);
+      // The per-card picker is gone. Where a change should land is now settled
+      // by its PARENT question, once, for the whole group - which is the
+      // difference between answering one question and answering it six times.
+      var picked = targetFor(c);
       fn = "chat_apply_record_update";
       args = {
         p_record_update_id: id,
@@ -716,7 +974,7 @@
         // something, the edited payload is what gets applied and the edit
         // itself is recorded alongside it.
         p_final_change: ed && ed.changed ? ed.change : null,
-        p_target_object_id: ed ? ed.target : picked,
+        p_target_object_id: ed ? (ed.target || picked) : picked,
         p_edits: ed && ed.changed
           ? { model: c.change, reviewer: ed.change,
               target_from: c.resolved_object_id || null, target_to: ed.target || null }
@@ -725,7 +983,7 @@
     }
 
     setCardBusy(id, true);
-    rpc(fn, args).then(function (d) {
+    return rpc(fn, args).then(function (d) {
       setCardBusy(id, false);
       if (d && d.ok === true) {
         c.status = mode === "reject" ? "rejected" : "applied";
@@ -739,15 +997,148 @@
           setState("closed", true);
         }
         renderStream(false, true);
-      } else {
-        cardError[id] = explainDecision(d);
-        renderStream(false, true);
+        return true;
       }
+      cardError[id] = explainDecision(d);
+      renderStream(false, true);
+      return false;
     }).catch(function (err) {
       setCardBusy(id, false);
       cardError[id] = "Could not reach the server. Nothing was changed. (" + err.message + ")";
       renderStream(false, true);
+      return false;
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Answering a PARENT question. Three answers, and each of them is a different
+  // act on the database.
+  // ---------------------------------------------------------------------------
+  function firstOf(g) { return g.items[0] || {}; }
+  function groupByKey(k) {
+    var gs = buildGroups(), i;
+    for (i = 0; i < gs.length; i++) if (gs[i].key === k) return gs[i];
+    return null;
+  }
+  function pendingIdsOf(g) {
+    var out = [], i;
+    for (i = 0; i < g.items.length; i++) if (g.items[i].status === "pending") out.push(g.items[i].id);
+    return out;
+  }
+  function setGroupBusy(k, on) {
+    var el = document.querySelector('[data-group="' + k + '"]');
+    if (el) el.classList.toggle("busy", !!on);
+  }
+  function attachRecord(k, id, name, created) {
+    attached[k] = id;
+    pickingFor = null;
+    delete groupError[k];
+    notices.push(created
+      ? "Added " + name + " to your records. Now the changes that needed it."
+      : "Right — those changes will land on " + name + ".");
+    renderStream(false, true);
+  }
+
+  // "Add them". The record is written the moment this is answered - the product
+  // owner's decision on 30 July, over holding the answer until the first change
+  // is approved. What he presses is what happens.
+  function answerAdd(k) {
+    var g = groupByKey(k); if (!g) return;
+    var c = firstOf(g);
+    delete groupError[k];
+    setGroupBusy(k, true);
+    rpc("chat_create_record", {
+      p_conversation_id: convId,
+      p_entity_name: c.entity_name,
+      p_entity_type: c.entity_type || "partner"
+    }).then(function (d) {
+      setGroupBusy(k, false);
+      if (d && d.ok === true && d.record) {
+        candidates.push({ id: d.record.id, name: d.record.name, object_type: d.record.object_type });
+        attachRecord(k, d.record.id, d.record.name, true);
+        recordsLoaded = false;
+        return;
+      }
+      // REFUSAL S7-6 and S7-13. A name that already exists is not created
+      // twice - and this is also the reload path, where the page has forgotten
+      // it already pressed this. The database hands back the existing record,
+      // so the right thing to do is attach to it rather than complain.
+      if (d && d.error === "already_exists" && d.record) {
+        var seen = false, i;
+        for (i = 0; i < candidates.length; i++) if (candidates[i].id === d.record.id) seen = true;
+        if (!seen) candidates.push({ id: d.record.id, name: d.record.name, object_type: d.record.object_type });
+        attachRecord(k, d.record.id, d.record.name, false);
+        return;
+      }
+      groupError[k] = explainCreate(d);
+      renderStream(false, true);
+    }).catch(function (err) {
+      setGroupBusy(k, false);
+      groupError[k] = "Could not reach the server, so nothing was created. (" + err.message + ")";
+      renderStream(false, true);
+    });
+  }
+
+  // "Skip anything about them". Blueprint 8.6: declining a parent records its
+  // children as rejected and SAYS SO. Chosen over silently withdrawing them,
+  // which would leave no trace of proposals the system made and the owner did
+  // not want. One statement, so the sentence he reads is true.
+  function answerSkip(k) {
+    var g = groupByKey(k); if (!g) return;
+    var ids = pendingIdsOf(g);
+    delete groupError[k];
+    setGroupBusy(k, true);
+    rpc("chat_reject_group", { p_conversation_id: convId, p_record_update_ids: ids })
+      .then(function (d) {
+        setGroupBusy(k, false);
+        if (d && d.ok === true) {
+          skipped[k] = true;
+          for (var i = 0; i < g.items.length; i++)
+            if (g.items[i].status === "pending") g.items[i].status = "rejected";
+          notices.push("I've dropped the " + d.rejected + " change" + (d.rejected === 1 ? "" : "s") +
+                       " that needed " + g.name + ". Nothing on your records changed.");
+          if (d.thread_closed) { closedNotice = true; setState("closed", true); }
+          renderStream(false, true);
+          return;
+        }
+        groupError[k] = "Nothing there was still waiting on a decision, so nothing was changed.";
+        renderStream(false, true);
+      }).catch(function (err) {
+        setGroupBusy(k, false);
+        groupError[k] = "Could not reach the server. Nothing was changed. (" + err.message + ")";
+        renderStream(false, true);
+      });
+  }
+
+  function explainCreate(d) {
+    var e = d && d.error;
+    if (e === "not_proposed")
+      return "Nothing still waiting on a decision in this conversation refers to that record, " +
+             "so it was not created. Nothing was written.";
+    if (e === "bad_type")   return "That is not a kind of record this can create. Nothing was written.";
+    if (e === "no_name")    return "There is no name to create a record from. Nothing was written.";
+    if (e === "no_workspace")
+      return "This account has no person-record in a workspace, so it cannot write anything.";
+    return "The record was not created (" + (e || "unknown") + "). Nothing was written.";
+  }
+
+  // The escape hatch. Only ever offered on a routine set - see escapeAllowed.
+  // Sequential rather than parallel: each apply is its own statement, and if
+  // one refuses, the rest stop rather than carrying on past a refusal nobody
+  // has read yet.
+  function doTheLot() {
+    if (escapeBusy) return;
+    escapeBusy = true;
+    var queue = [], i;
+    for (i = 0; i < cards.length; i++) if (cards[i].status === "pending") queue.push(cards[i].id);
+    var run = function (n) {
+      if (n >= queue.length) { escapeBusy = false; renderStream(false, true); return; }
+      decide(queue[n], "approve").then(function (okay) {
+        if (!okay) { escapeBusy = false; renderStream(false, true); return; }
+        run(n + 1);
+      });
+    };
+    run(0);
   }
 
   // Every refusal gets a sentence a person can act on, and every one of them
@@ -871,6 +1262,7 @@
     $("view-app").classList.add("on");
     turns = []; cards = []; candidates = []; closedNotice = false;
     recordsLoaded = false; editingId = null; cardError = {}; generating = false;
+    attached = {}; skipped = {}; pickingFor = null; groupError = {}; notices = []; escapeBusy = false;
     renderStream(false);
     // ONE request: who I am, my open conversation, its whole transcript, any
     // proposals still waiting on it, and the records a picker could attach to.
@@ -942,12 +1334,35 @@
     loadRecords(false);
   });
 
-  // One listener for every card button, so cards can be re-rendered freely.
+  // One listener for every button in the flow, so the question on screen can be
+  // re-rendered freely without any of them going dead.
   $("stream").addEventListener("click", function (e) {
-    var b = e.target.closest ? e.target.closest("[data-act]") : null;
+    if (!e.target.closest) return;
+
+    // Answers to a PARENT question.
+    var gb = e.target.closest("[data-gact]");
+    if (gb) {
+      var k = gb.getAttribute("data-g"), gact = gb.getAttribute("data-gact");
+      if (gact === "add")             answerAdd(k);
+      else if (gact === "skip")       answerSkip(k);
+      else if (gact === "pick")       { pickingFor = k; delete groupError[k]; renderStream(false, true); }
+      else if (gact === "pickcancel") { pickingFor = null; renderStream(false, true); }
+      else if (gact === "pickconfirm") {
+        var sel = document.querySelector('[data-gpick="' + k + '"]');
+        var chosen = sel && sel.value ? sel.value : null;
+        if (!chosen) { groupError[k] = "Choose a record first, or skip these."; renderStream(false, true); return; }
+        var nm = "that record", i;
+        for (i = 0; i < candidates.length; i++) if (candidates[i].id === chosen) nm = candidates[i].name;
+        attachRecord(k, chosen, nm, false);
+      }
+      return;
+    }
+
+    var b = e.target.closest("[data-act]");
     if (!b) return;
     var id = b.getAttribute("data-id"), act = b.getAttribute("data-act");
-    if (act === "edit")        { editingId = id; delete cardError[id]; renderStream(false, true); }
+    if (act === "escape")      doTheLot();
+    else if (act === "edit")   { editingId = id; delete cardError[id]; renderStream(false, true); }
     else if (act === "cancel") { editingId = null; renderStream(false, true); }
     else if (act === "approve") decide(id, "approve");
     else if (act === "save")    decide(id, "save");
