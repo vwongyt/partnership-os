@@ -8,30 +8,21 @@
   :root{
     --ink:#1c1b19; --ink-2:#55524d; --ink-3:#8a857e;
     --bg:#faf9f7; --card:#ffffff; --line:#e7e4df;
-    --accent:#1f5c4d; --accent-soft:#e8f0ed;
+    --accent:#1f5c4d; --accent-soft:#e8f0ed; --accent-line:#cfe0da;
     --warn:#8a2f22; --warn-soft:#fbecea;
     --radius:12px;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
+  html,body{margin:0;padding:0;height:100%}
   body{
     background:var(--bg); color:var(--ink);
-    font:16px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;
   }
-  .wrap{max-width:980px;margin:0 auto;padding:32px 24px 96px}
-
-  /* ---------- top bar ---------- */
-  header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:28px}
-  .brand{font-size:20px;font-weight:650;letter-spacing:-0.01em}
-  .brand span{color:var(--ink-3);font-weight:450}
-  .who{font-size:14px;color:var(--ink-2);display:flex;align-items:center;gap:12px}
-
-  /* ---------- buttons ---------- */
   button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid transparent;transition:.12s}
-  .btn-primary{background:var(--accent);color:#fff;padding:11px 18px;font-weight:550;width:100%}
+  .btn-primary{background:var(--accent);color:#fff;padding:11px 18px;font-weight:550}
   .btn-primary:hover{filter:brightness(1.08)}
-  .btn-primary:disabled{opacity:.55;cursor:default;filter:none}
+  .btn-primary:disabled{opacity:.4;cursor:default;filter:none}
   .btn-quiet{background:transparent;color:var(--ink-2);border-color:var(--line);padding:6px 12px;font-size:13px}
   .btn-quiet:hover{background:#fff;color:var(--ink)}
 
@@ -41,25 +32,77 @@
   .login h1{margin:0 0 6px;font-size:22px;letter-spacing:-0.01em}
   .login p.sub{margin:0 0 26px;color:var(--ink-2);font-size:14px}
   label{display:block;font-size:13px;font-weight:550;color:var(--ink-2);margin:0 0 6px}
-  input{width:100%;font:inherit;padding:10px 12px;margin-bottom:18px;
+  .login input{width:100%;font:inherit;padding:10px 12px;margin-bottom:18px;
         border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
-  input:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  .login input:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  .login .btn-primary{width:100%}
   .msg{display:none;margin-top:18px;padding:11px 13px;border-radius:8px;font-size:14px;
        background:var(--warn-soft);color:var(--warn);border:1px solid #f0d5d0}
   .msg.show{display:block}
   .note{margin-top:22px;padding-top:18px;border-top:1px solid var(--line);
         font-size:12.5px;line-height:1.5;color:var(--ink-3)}
 
-  /* ---------- data ---------- */
+  /* ---------- app shell ---------- */
+  #view-app{display:none;flex-direction:column;height:100%}
+  #view-app.on{display:flex}
+  .topbar{display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid var(--line);
+          background:var(--card);flex-wrap:wrap}
+  .brand{font-size:17px;font-weight:650;letter-spacing:-0.01em;margin-right:6px}
+  .tabs{display:flex;gap:4px}
+  .tab{background:transparent;border:1px solid transparent;color:var(--ink-2);padding:6px 14px;
+       font-size:14px;border-radius:999px}
+  .tab:hover{background:var(--bg)}
+  .tab.sel{background:var(--accent-soft);color:var(--accent);border-color:var(--accent-line);font-weight:550}
+  .who{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13.5px;color:var(--ink-2)}
+
+  .pane{flex:1;min-height:0;overflow:auto}
+  .pane[hidden]{display:none}
+  .measure{max-width:720px;margin:0 auto;padding:28px 24px 8px}
+
+  /* ---------- conversation ---------- */
+  .turn{display:flex;margin-bottom:18px}
+  .turn.user{justify-content:flex-end}
+  .bubble{max-width:82%;padding:13px 17px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word}
+  .turn.user .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:5px}
+  .turn.assistant .bubble{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:5px}
+  .stamp{font-size:11.5px;color:var(--ink-3);margin:5px 3px 0;letter-spacing:.01em}
+  .turn.user .stamp{text-align:right}
+  .turn .col{display:flex;flex-direction:column;max-width:82%}
+
+  .system{max-width:720px;margin:0 auto 18px;font-size:13.5px;color:var(--ink-2);
+          background:var(--accent-soft);border:1px solid var(--accent-line);
+          border-radius:10px;padding:11px 15px}
+  .system.bad{background:var(--warn-soft);border-color:#f0d5d0;color:var(--warn)}
+
+  .thinking{display:flex;gap:6px;align-items:center;padding:13px 17px;background:var(--card);
+            border:1px solid var(--line);border-radius:16px;border-bottom-left-radius:5px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--ink-3);animation:bob 1.2s infinite}
+  .dot:nth-child(2){animation-delay:.15s}
+  .dot:nth-child(3){animation-delay:.3s}
+  @keyframes bob{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:.9;transform:translateY(-3px)}}
+
+  .blank{max-width:720px;margin:8vh auto 0;padding:0 24px;text-align:center;color:var(--ink-2)}
+  .blank h2{font-size:19px;font-weight:600;color:var(--ink);margin:0 0 10px;letter-spacing:-0.01em}
+  .blank p{margin:0 auto;max-width:460px;font-size:14.5px}
+
+  /* ---------- composer ---------- */
+  .composer{border-top:1px solid var(--line);background:var(--card);padding:14px 24px 18px}
+  .composer-inner{max-width:720px;margin:0 auto;display:flex;gap:10px;align-items:flex-end}
+  #box{flex:1;font:inherit;resize:none;padding:12px 14px;border:1px solid var(--line);
+       border-radius:12px;background:var(--bg);color:var(--ink);max-height:180px;line-height:1.5}
+  #box:focus{outline:2px solid var(--accent-soft);border-color:var(--accent);background:#fff}
+  .hint{max-width:720px;margin:8px auto 0;font-size:12px;color:var(--ink-3);display:flex;
+        justify-content:space-between;gap:12px}
+
+  /* ---------- records ---------- */
   .summary{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-           padding:20px 22px;margin-bottom:26px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
-  .big{font-size:32px;font-weight:650;letter-spacing:-0.02em;line-height:1}
+           padding:18px 20px;margin-bottom:22px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .big{font-size:30px;font-weight:650;letter-spacing:-0.02em;line-height:1}
   .summary .lbl{color:var(--ink-2);font-size:14.5px}
   .ws{margin-left:auto;font-size:12px;color:var(--ink-3);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-
-  section.group{margin-bottom:26px}
-  h2{margin:0 0 10px;font-size:13px;font-weight:650;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
-  h2 em{font-style:normal;font-weight:450;text-transform:none;letter-spacing:0;color:var(--ink-3)}
+  section.group{margin-bottom:24px}
+  h2.gh{margin:0 0 10px;font-size:12.5px;font-weight:650;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+  h2.gh em{font-style:normal;font-weight:450;text-transform:none;letter-spacing:0}
   ul.rows{list-style:none;margin:0;padding:0;background:var(--card);
           border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
   ul.rows li{padding:13px 18px;border-top:1px solid var(--line)}
@@ -72,17 +115,16 @@
   .empty{color:var(--ink-2);font-size:14.5px;background:var(--card);border:1px solid var(--line);
          border-radius:var(--radius);padding:22px}
   .loading{color:var(--ink-3);font-size:14.5px;padding:8px 2px}
-  footer{margin-top:40px;font-size:12.5px;color:var(--ink-3);line-height:1.6}
   code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 </style>
 </head>
 <body>
 
 <!-- ============ LOGGED OUT ============ -->
-<div id="view-login" class="wrap" hidden>
+<div id="view-login" hidden>
   <form class="login" id="loginForm" autocomplete="on">
     <h1>Partnership OS</h1>
-    <p class="sub">Sign in to see your workspace.</p>
+    <p class="sub">Sign in to open your workspace.</p>
 
     <label for="email">Email</label>
     <input id="email" name="email" type="email" autocomplete="username" required>
@@ -100,19 +142,35 @@
   </form>
 </div>
 
-<!-- ============ LOGGED IN ============ -->
-<div id="view-data" class="wrap" hidden>
-  <header>
-    <div class="brand">Partnership OS <span>· proof page</span></div>
+<!-- ============ SIGNED IN ============ -->
+<div id="view-app">
+  <div class="topbar">
+    <div class="brand">Partnership OS</div>
+    <div class="tabs">
+      <button class="tab sel" id="tabChat" type="button">Conversation</button>
+      <button class="tab" id="tabRecords" type="button">Records</button>
+    </div>
     <div class="who"><span id="whoami"></span><button class="btn-quiet" id="logoutBtn">Sign out</button></div>
-  </header>
+  </div>
 
-  <div id="content"><p class="loading">Loading your records…</p></div>
+  <div class="pane" id="paneChat">
+    <div class="measure" id="stream"></div>
+  </div>
 
-  <footer>
-    Session 4b — this page reads <code>objects</code> only. Filtering is done by the database
-    (row level security), not by this page.
-  </footer>
+  <div class="pane" id="paneRecords" hidden>
+    <div class="measure" id="records"><p class="loading">Loading your records…</p></div>
+  </div>
+
+  <div class="composer" id="composer">
+    <div class="composer-inner">
+      <textarea id="box" rows="1" placeholder="What happened? Write it however you'd say it." aria-label="Your update"></textarea>
+      <button class="btn-primary" id="send" type="button" disabled>Send</button>
+    </div>
+    <div class="hint">
+      <span id="stateHint"></span>
+      <span>Enter to send · Shift+Enter for a new line</span>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -121,24 +179,29 @@
 
   // ---------------------------------------------------------------------------
   // Configuration. The publishable key is public by design: it identifies the
-  // project, not the person. Without a signed-in user's token every table
-  // answers "permission denied". The secret key never leaves Supabase.
+  // project, not the person. Without a signed-in user's token every table and
+  // every function answers "permission denied". The secret key never leaves
+  // Supabase, and the Anthropic key lives only in Edge Function secrets.
   // ---------------------------------------------------------------------------
-  var SUPABASE_URL = "https://mxizgdnvftwjzgbrhhpa.supabase.co";
+  var SUPABASE_URL   = "https://mxizgdnvftwjzgbrhhpa.supabase.co";
   var PUBLISHABLE_KEY = "sb_publishable_a3j9KMGdJlIhTDmj3QaXiw_VZoznxD8";
-  var STORE_KEY = "partnership-os.session";
+  var STORE_KEY      = "partnership-os.session";
+  var TURN_URL       = SUPABASE_URL + "/functions/v1/chat-turn";
 
   var $ = function (id) { return document.getElementById(id); };
+
   var session = null;
+  var turns = [];          // [{role, content, created_at}]
+  var busy = false;
+  var closedNotice = false;
+  var recordsLoaded = false;
 
   // ---------------------------------------------------------------------------
-  // Session storage
+  // Session storage — unchanged from Session 4b. Inherited, not rebuilt.
   // ---------------------------------------------------------------------------
   function loadSession() {
-    try {
-      var raw = localStorage.getItem(STORE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+    try { var raw = localStorage.getItem(STORE_KEY); return raw ? JSON.parse(raw) : null; }
+    catch (e) { return null; }
   }
   function saveSession(s) {
     session = s;
@@ -148,10 +211,11 @@
     session = null;
     try { localStorage.removeItem(STORE_KEY); } catch (e) {}
   }
+  function expired(s) {
+    if (!s || !s.expires_at) return true;
+    return (s.expires_at * 1000) - Date.now() < 60000;
+  }
 
-  // ---------------------------------------------------------------------------
-  // Auth
-  // ---------------------------------------------------------------------------
   function authRequest(path, body) {
     return fetch(SUPABASE_URL + "/auth/v1/" + path, {
       method: "POST",
@@ -163,15 +227,12 @@
       });
     });
   }
-
   function signIn(email, password) {
     return authRequest("token?grant_type=password", { email: email, password: password });
   }
-
   function refresh(refreshToken) {
     return authRequest("token?grant_type=refresh_token", { refresh_token: refreshToken });
   }
-
   function signOut() {
     var token = session && session.access_token;
     clearSession();
@@ -183,20 +244,20 @@
     }
   }
 
-  function expired(s) {
-    if (!s || !s.expires_at) return true;
-    return (s.expires_at * 1000) - Date.now() < 60000; // 60s safety margin
+  // ---------------------------------------------------------------------------
+  // Data access
+  // ---------------------------------------------------------------------------
+  function authHeaders() {
+    return {
+      "apikey": PUBLISHABLE_KEY,
+      "Authorization": "Bearer " + session.access_token,
+      "Content-Type": "application/json"
+    };
   }
 
-  // ---------------------------------------------------------------------------
-  // Data — two requests, fired together, not one after the other.
-  // ---------------------------------------------------------------------------
-  function apiGet(path) {
-    return fetch(SUPABASE_URL + "/rest/v1/" + path, {
-      headers: {
-        "apikey": PUBLISHABLE_KEY,
-        "Authorization": "Bearer " + session.access_token
-      }
+  function rpc(fn, args) {
+    return fetch(SUPABASE_URL + "/rest/v1/rpc/" + fn, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify(args || {})
     }).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (j) {
         if (!r.ok) throw new Error((j && j.message) || ("HTTP " + r.status));
@@ -205,47 +266,159 @@
     });
   }
 
-  function loadData() {
-    $("content").innerHTML = '<p class="loading">Loading your records…</p>';
-    Promise.all([
-      apiGet("objects?select=id,object_type,name,properties,workspace_id&order=object_type.asc,name.asc"),
-      apiGet("users_and_preferences?select=display_name,workspace_id,role")
-    ]).then(function (res) {
-      renderWho(res[1]);
-      renderObjects(res[0]);
-    }).catch(function (err) {
-      $("content").innerHTML =
-        '<div class="empty"><strong>Could not load records.</strong><br>' +
-        escapeHtml(err.message) + "</div>";
-    });
+  function apiGet(path) {
+    return fetch(SUPABASE_URL + "/rest/v1/" + path, { headers: authHeaders() })
+      .then(function (r) {
+        return r.json().catch(function () { return null; }).then(function (j) {
+          if (!r.ok) throw new Error((j && j.message) || ("HTTP " + r.status));
+          return j;
+        });
+      });
   }
 
   // ---------------------------------------------------------------------------
-  // Rendering
+  // Rendering helpers
   // ---------------------------------------------------------------------------
   function escapeHtml(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
-
   function titleCase(s) {
     return String(s || "").replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
   }
-
-  function renderWho(people) {
-    var me = people && people[0];
-    $("whoami").textContent = me
-      ? me.display_name + " · " + me.workspace_id
-      : "signed in";
+  function clockTime(iso) {
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch (e) { return ""; }
   }
 
+  // A plain-English line for where the conversation stands. The status values
+  // are the database's; this is the only place they are translated for a human.
+  var STATE_WORDS = {
+    gathering:                "Listening.",
+    awaiting_clarification:   "Waiting on your answer to the question above.",
+    awaiting_permission:      "Waiting on your go-ahead.",
+    generating_record_updates:"You said go ahead — record updates aren't wired into this app yet.",
+    record_updates_ready:     "Record updates are ready for review.",
+    proposed:                 "Record updates are waiting for review.",
+    info_delivered:           "Answered — this thread is closed.",
+    closed:                   "This thread is closed."
+  };
+
+  function setState(status, closed) {
+    var s = $("stateHint");
+    if (!status) { s.textContent = ""; return; }
+    s.textContent = STATE_WORDS[status] || status;
+    if (closed && status !== "info_delivered" && status !== "closed") {
+      s.textContent += " Thread closed.";
+    }
+  }
+
+  function renderStream(pending) {
+    var html = "", i, t;
+    if (!turns.length && !pending) {
+      $("stream").innerHTML =
+        '<div class="blank"><h2>Nothing on the go.</h2>' +
+        '<p>Tell me what happened — a call, a meeting, a note to self. Write it the way ' +
+        'you would say it out loud. I will read it back and check what I understood ' +
+        'before anything touches your records.</p></div>';
+      return;
+    }
+    for (i = 0; i < turns.length; i++) {
+      t = turns[i];
+      html += '<div class="turn ' + (t.role === "user" ? "user" : "assistant") + '">' +
+                '<div class="col">' +
+                  '<div class="bubble">' + escapeHtml(t.content) + "</div>" +
+                  '<div class="stamp">' + escapeHtml(clockTime(t.created_at)) + "</div>" +
+                "</div></div>";
+    }
+    if (pending) {
+      html += '<div class="turn assistant"><div class="col"><div class="thinking">' +
+              '<span class="dot"></span><span class="dot"></span><span class="dot"></span>' +
+              "</div></div></div>";
+    }
+    if (closedNotice) {
+      html += '<div class="system">This thread is closed. Your next message starts a new one.</div>';
+    }
+    $("stream").innerHTML = html;
+    var p = $("paneChat");
+    p.scrollTop = p.scrollHeight;
+  }
+
+  function systemNote(text, bad) {
+    var d = document.createElement("div");
+    d.className = "system" + (bad ? " bad" : "");
+    d.textContent = text;
+    $("stream").appendChild(d);
+    var p = $("paneChat");
+    p.scrollTop = p.scrollHeight;
+  }
+
+  // ---------------------------------------------------------------------------
+  // A turn. ONE request from this laptop. The Edge Function does the capture,
+  // the Claude call and the write-back next to the database.
+  // ---------------------------------------------------------------------------
+  function sendTurn(text) {
+    busy = true;
+    $("send").disabled = true;
+    $("box").disabled = true;
+    turns.push({ role: "user", content: text, created_at: new Date().toISOString() });
+    renderStream(true);
+
+    fetch(TURN_URL, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ message: text })
+    }).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (j) {
+        return { status: r.status, data: j };
+      });
+    }).then(function (res) {
+      var d = res.data;
+      if (d && d.ok === true) {
+        // Replace the optimistic copy with what the database actually stored.
+        turns[turns.length - 1] = d.user_message;
+        turns.push(d.assistant_message);
+        closedNotice = !!d.closed;
+        setState(d.status, d.closed);
+        renderStream(false);
+      } else {
+        renderStream(false);
+        systemNote(explain(res.status, d), true);
+      }
+    }).catch(function () {
+      renderStream(false);
+      systemNote("Could not reach the server. Your message was not saved — try again.", true);
+    }).then(function () {
+      busy = false;
+      $("box").disabled = false;
+      $("send").disabled = !$("box").value.trim();
+      $("box").focus();
+    });
+  }
+
+  // Every failure gets a plain sentence and, where it matters, says whether
+  // the message was saved. Silence is the one thing not allowed.
+  function explain(status, d) {
+    var e = d && d.error;
+    if (e === "empty_message")   return "There was nothing in that message, so nothing was saved.";
+    if (e === "no_workspace")    return "This account is signed in but has no person-record in a workspace, so it cannot read or write anything. That is a correct refusal, not a fault.";
+    if (e === "not_signed_in")   return "Your session has expired. Sign out and back in.";
+    if (e === "model_response_unparseable" || e === "model_call_failed" || e === "model_unreachable")
+      return "Your message was saved, but the interpretation step failed, so nothing was written to the conversation. Send it again.";
+    if (e === "invalid_response")  return "Your message was saved. The reply came back in a shape the database refused to store, so the conversation was left untouched.";
+    if (e === "conversation_not_found") return "Your message was saved, but the conversation it belongs to is already closed. Start a new one.";
+    if (e === "server_not_configured")  return "The server is missing its Anthropic key. Nothing was saved.";
+    return "Something went wrong (" + (e || ("HTTP " + status)) + "). Nothing was changed.";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Records tab — loaded on first open, not on sign-in.
+  // ---------------------------------------------------------------------------
   function propChips(props) {
     if (!props || typeof props !== "object") return "";
     var out = [], keys = Object.keys(props), i, k, v;
     for (i = 0; i < keys.length && out.length < 4; i++) {
-      k = keys[i];
-      v = props[k];
+      k = keys[i]; v = props[k];
       if (v === null || v === undefined || v === "") continue;
       if (typeof v === "object") continue;
       v = String(v);
@@ -258,47 +431,53 @@
   function renderObjects(rows) {
     rows = rows || [];
     var workspaces = {}, groups = {}, order = [], i, r;
-
     for (i = 0; i < rows.length; i++) {
       r = rows[i];
       workspaces[r.workspace_id] = true;
       if (!groups[r.object_type]) { groups[r.object_type] = []; order.push(r.object_type); }
       groups[r.object_type].push(r);
     }
-
-    var wsList = Object.keys(workspaces);
     var html =
-      '<div class="summary">' +
-        '<span class="big">' + rows.length + "</span>" +
-        '<span class="lbl">objects across ' + order.length + " type" + (order.length === 1 ? "" : "s") + "</span>" +
-        '<span class="ws">' + escapeHtml(wsList.join(", ") || "—") + "</span>" +
-      "</div>";
+      '<div class="summary"><span class="big">' + rows.length + "</span>" +
+      '<span class="lbl">records across ' + order.length + " type" + (order.length === 1 ? "" : "s") + "</span>" +
+      '<span class="ws">' + escapeHtml(Object.keys(workspaces).join(", ") || "—") + "</span></div>";
 
     if (!rows.length) {
-      html += '<div class="empty">No records are visible to this account. ' +
-              "That is what the database returns when the signed-in user has no person-record " +
-              "in any workspace — it is a correct refusal, not an error.</div>";
-      $("content").innerHTML = html;
+      html += '<div class="empty">No records are visible to this account. That is what the ' +
+              "database returns when the signed-in user has no person-record in any workspace " +
+              "— a correct refusal, not an error.</div>";
+      $("records").innerHTML = html;
       return;
     }
-
     for (i = 0; i < order.length; i++) {
       var type = order[i], list = groups[type], j, items = "";
       for (j = 0; j < list.length; j++) {
         items += "<li><div class=\"nm\">" + escapeHtml(list[j].name) + "</div>" +
                  propChips(list[j].properties) + "</li>";
       }
-      html += '<section class="group"><h2>' + escapeHtml(titleCase(type)) +
+      html += '<section class="group"><h2 class="gh">' + escapeHtml(titleCase(type)) +
               " <em>· " + list.length + "</em></h2><ul class=\"rows\">" + items + "</ul></section>";
     }
-    $("content").innerHTML = html;
+    $("records").innerHTML = html;
+  }
+
+  function loadRecords() {
+    if (recordsLoaded) return;
+    recordsLoaded = true;
+    apiGet("objects?select=id,object_type,name,properties,workspace_id&order=object_type.asc,name.asc")
+      .then(renderObjects)
+      .catch(function (err) {
+        recordsLoaded = false;
+        $("records").innerHTML = '<div class="empty"><strong>Could not load records.</strong><br>' +
+                                 escapeHtml(err.message) + "</div>";
+      });
   }
 
   // ---------------------------------------------------------------------------
-  // View switching
+  // Views
   // ---------------------------------------------------------------------------
   function showLogin(message) {
-    $("view-data").hidden = true;
+    $("view-app").classList.remove("on");
     $("view-login").hidden = false;
     var m = $("loginMsg");
     if (message) { m.textContent = message; m.classList.add("show"); }
@@ -307,10 +486,35 @@
     $("loginBtn").textContent = "Sign in";
   }
 
-  function showData() {
+  function showApp() {
     $("view-login").hidden = true;
-    $("view-data").hidden = false;
-    loadData();
+    $("view-app").classList.add("on");
+    turns = []; closedNotice = false; recordsLoaded = false;
+    renderStream(false);
+    // ONE request: who I am, my open conversation, and its whole transcript.
+    rpc("chat_load_open", {}).then(function (d) {
+      if (!d || d.ok !== true) {
+        $("whoami").textContent = "signed in";
+        systemNote("You are signed in, but this account has no person-record in a workspace, " +
+                   "so there is nothing to show and nothing can be saved.", true);
+        $("send").disabled = true;
+        return;
+      }
+      $("whoami").textContent = d.who ? (d.who.display_name + " · " + d.who.workspace_id) : "signed in";
+      turns = Array.isArray(d.turns) ? d.turns : [];
+      setState(d.status, false);
+      renderStream(false);
+      if (turns.length) {
+        var first = $("stream").firstChild;
+        var n = document.createElement("div");
+        n.className = "system";
+        n.textContent = "Picking up where you left off.";
+        $("stream").insertBefore(n, first);
+      }
+      $("box").focus();
+    }).catch(function (err) {
+      systemNote("Could not load your conversation. " + err.message, true);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -322,16 +526,13 @@
     btn.disabled = true;
     btn.textContent = "Signing in…";
     $("loginMsg").classList.remove("show");
-
     signIn($("email").value.trim(), $("password").value).then(function (res) {
       if (res.ok && res.data && res.data.access_token) {
         $("password").value = "";
         saveSession(res.data);
-        showData();
+        showApp();
       } else {
-        var m = (res.data && (res.data.error_description || res.data.msg || res.data.message)) ||
-                "Sign-in failed.";
-        showLogin(m);
+        showLogin((res.data && (res.data.error_description || res.data.msg || res.data.message)) || "Sign-in failed.");
       }
     }).catch(function () {
       showLogin("Could not reach the server. Check your connection and try again.");
@@ -340,22 +541,56 @@
 
   $("logoutBtn").addEventListener("click", function () {
     signOut();
+    turns = [];
     showLogin("Signed out.");
   });
 
+  $("tabChat").addEventListener("click", function () {
+    $("tabChat").classList.add("sel"); $("tabRecords").classList.remove("sel");
+    $("paneChat").hidden = false; $("paneRecords").hidden = true;
+    $("composer").style.display = "";
+  });
+  $("tabRecords").addEventListener("click", function () {
+    $("tabRecords").classList.add("sel"); $("tabChat").classList.remove("sel");
+    $("paneRecords").hidden = false; $("paneChat").hidden = true;
+    $("composer").style.display = "none";
+    loadRecords();
+  });
+
+  // R5, at the surface as well as in the database: an empty box cannot be sent.
+  function grow() {
+    var b = $("box");
+    b.style.height = "auto";
+    b.style.height = Math.min(b.scrollHeight, 180) + "px";
+    $("send").disabled = busy || !b.value.trim();
+  }
+  $("box").addEventListener("input", grow);
+  $("box").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); trySend(); }
+  });
+  $("send").addEventListener("click", trySend);
+
+  function trySend() {
+    if (busy) return;
+    var b = $("box"), text = b.value.trim();
+    if (!text) return;
+    b.value = ""; grow();
+    sendTurn(text);
+  }
+
   // ---- boot ----------------------------------------------------------------
+  // Nothing is fetched before a session exists, so there is no flash of data.
   session = loadSession();
   if (!session) {
     showLogin();
   } else if (!expired(session)) {
-    showData();
+    showApp();
   } else if (session.refresh_token) {
     refresh(session.refresh_token).then(function (res) {
-      if (res.ok && res.data && res.data.access_token) { saveSession(res.data); showData(); }
+      if (res.ok && res.data && res.data.access_token) { saveSession(res.data); showApp(); }
       else { clearSession(); showLogin("Your session expired. Please sign in again."); }
     }).catch(function () {
-      clearSession();
-      showLogin("Your session expired. Please sign in again.");
+      clearSession(); showLogin("Your session expired. Please sign in again.");
     });
   } else {
     clearSession();
