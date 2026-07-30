@@ -10,6 +10,7 @@
     --bg:#faf9f7; --card:#ffffff; --line:#e7e4df;
     --accent:#1f5c4d; --accent-soft:#e8f0ed; --accent-line:#cfe0da;
     --warn:#8a2f22; --warn-soft:#fbecea;
+    --risk-high:#8a2f22; --risk-med:#8a6a22; --risk-low:#55524d;
     --radius:12px;
   }
   *{box-sizing:border-box}
@@ -84,6 +85,59 @@
   .blank{max-width:720px;margin:8vh auto 0;padding:0 24px;text-align:center;color:var(--ink-2)}
   .blank h2{font-size:19px;font-weight:600;color:var(--ink);margin:0 0 10px;letter-spacing:-0.01em}
   .blank p{margin:0 auto;max-width:460px;font-size:14.5px}
+
+  /* ---------- proposed changes, in the conversation ---------- */
+  .prop-head{display:flex;align-items:baseline;gap:10px;margin:6px 0 12px}
+  .prop-head h3{margin:0;font-size:13px;font-weight:650;letter-spacing:.06em;
+                text-transform:uppercase;color:var(--ink-3)}
+  .prop-head .count{font-size:13px;color:var(--ink-2)}
+  .prop-head .why{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
+
+  .prop{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+        padding:16px 18px;margin-bottom:12px}
+  .prop.done{opacity:.62;background:transparent}
+  .prop.busy{opacity:.5}
+  .prop-tags{display:flex;gap:6px;align-items:center;margin-bottom:11px;flex-wrap:wrap}
+  .tag{font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;font-weight:600;
+       border-radius:999px;padding:2px 9px;border:1px solid var(--line);color:var(--ink-3);background:#f4f2ef}
+  .tag.risk-high{color:#fff;background:var(--risk-high);border-color:var(--risk-high)}
+  .tag.risk-medium{color:#fff;background:var(--risk-med);border-color:var(--risk-med)}
+  .tag.risk-low{color:var(--ink-2)}
+  .tag.unmatched{color:#fff;background:var(--warn);border-color:var(--warn)}
+
+  /* Evidence comes first. Everything else on the card is a claim about it. */
+  .ev{border-left:3px solid var(--accent-line);padding:2px 0 2px 13px;margin:0 0 13px;
+      color:var(--ink);font-size:15px;font-style:italic}
+  .ev .lbl{display:block;font-style:normal;font-size:11.5px;letter-spacing:.05em;
+           text-transform:uppercase;color:var(--ink-3);margin-bottom:3px;font-weight:600}
+
+  .what{font-weight:550;margin-bottom:4px}
+  .detail{color:var(--ink-2);font-size:14.5px;margin-bottom:4px;white-space:pre-wrap}
+  .onto{font-size:13.5px;color:var(--ink-2);margin-bottom:4px}
+  .onto b{font-weight:550;color:var(--ink)}
+  .impact{font-size:13.5px;color:var(--ink-3);margin-bottom:13px}
+
+  .prop-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .btn-approve{background:var(--accent);color:#fff;padding:7px 15px;font-size:14px;font-weight:550}
+  .btn-approve:hover{filter:brightness(1.08)}
+  .btn-reject{background:transparent;color:var(--warn);border-color:#f0d5d0;padding:7px 13px;font-size:14px}
+  .btn-reject:hover{background:var(--warn-soft)}
+  .verdict{font-size:13.5px;color:var(--ink-2)}
+  .verdict b{font-weight:600;color:var(--ink)}
+
+  .edit{margin:0 0 13px;padding:13px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
+  .edit label{margin-top:9px}
+  .edit label:first-child{margin-top:0}
+  .edit input,.edit textarea,.edit select{width:100%;font:inherit;font-size:14.5px;padding:8px 10px;
+       border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink)}
+  .edit textarea{resize:vertical;min-height:80px;line-height:1.5}
+  .edit input:focus,.edit textarea:focus,.edit select:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  .edit .locked{margin-top:11px;font-size:12.5px;color:var(--ink-3);line-height:1.5}
+  .pick{margin:0 0 13px}
+  .pick select{width:100%;font:inherit;font-size:14.5px;padding:8px 10px;
+       border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink)}
+  .prop-err{margin-top:11px;font-size:13.5px;color:var(--warn);background:var(--warn-soft);
+            border:1px solid #f0d5d0;border-radius:7px;padding:9px 11px}
 
   /* ---------- composer ---------- */
   .composer{border-top:1px solid var(--line);background:var(--card);padding:14px 24px 18px}
@@ -192,9 +246,15 @@
 
   var session = null;
   var turns = [];          // [{role, content, created_at}]
+  var cards = [];          // proposed changes for the OPEN conversation only
+  var candidates = [];     // records the picker can attach an unmatched item to
+  var convId = null;
   var busy = false;
+  var generating = false;
   var closedNotice = false;
   var recordsLoaded = false;
+  var editingId = null;    // the card currently open for editing, if any
+  var cardError = {};      // id -> a sentence saying why the last decision failed
 
   // ---------------------------------------------------------------------------
   // Session storage — unchanged from Session 4b. Inherited, not rebuilt.
@@ -299,9 +359,8 @@
     gathering:                "Listening.",
     awaiting_clarification:   "Waiting on your answer to the question above.",
     awaiting_permission:      "Waiting on your go-ahead.",
-    generating_record_updates:"You said go ahead — record updates aren't wired into this app yet.",
-    record_updates_ready:     "Record updates are ready for review.",
-    proposed:                 "Record updates are waiting for review.",
+    generating_record_updates:"Working out what should change.",
+    record_updates_ready:     "Your call on each of the proposed changes.",
     info_delivered:           "Answered — this thread is closed.",
     closed:                   "This thread is closed."
   };
@@ -315,9 +374,145 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // A proposed change, in English rather than in schema.
+  // ---------------------------------------------------------------------------
+  function targetName(c) {
+    return c.resolved_object_name || c.entity_name || "an unnamed record";
+  }
+
+  function whatLine(c) {
+    var ch = c.change || {};
+    if (c.type === "note") return "Add a note to " + targetName(c);
+    if (c.type === "property_update")
+      return "Set " + titleCase(ch.field) + " to “" + (ch.to == null ? "" : ch.to) + "”";
+    if (c.type === "task") return "Create a task — " + (ch.title || c.summary || "");
+    return c.summary || c.type;
+  }
+
+  function detailLine(c) {
+    var ch = c.change || {}, bits = [];
+    if (c.type === "note") return ch.note_text || "";
+    if (c.type === "property_update") {
+      if (ch.from != null && ch.from !== "") return "Currently “" + ch.from + "”.";
+      return "";
+    }
+    if (c.type === "task") {
+      if (ch.suggested_due) bits.push("Due " + ch.suggested_due);
+      if (ch.suggested_owner) bits.push("Suggested owner: " + ch.suggested_owner);
+      return bits.join(" · ");
+    }
+    return "";
+  }
+
+  function candidateOptions(selected) {
+    var out = '<option value="">— choose a record —</option>', i, o;
+    for (i = 0; i < candidates.length; i++) {
+      o = candidates[i];
+      out += '<option value="' + escapeHtml(o.id) + '"' +
+             (o.id === selected ? " selected" : "") + ">" +
+             escapeHtml(o.name) + " · " + escapeHtml(titleCase(o.object_type)) + "</option>";
+    }
+    return out;
+  }
+
+  // The editor. Blueprint 8.4: an edit changes exactly two things — the record
+  // the change attaches to, and the change's payload. The evidence sentence is
+  // NOT editable (editing it would destroy the only thing that makes approval
+  // mean anything) and neither is the risk level (it is a rule; if the rule is
+  // wrong, the rule changes). Neither is even sent to the database.
+  function editorHtml(c) {
+    var ch = c.change || {}, h = '<div class="edit">';
+    if (c.type === "note") {
+      h += '<label for="e-text-' + c.id + '">Note</label>' +
+           '<textarea id="e-text-' + c.id + '" data-f="note_text">' + escapeHtml(ch.note_text || "") + "</textarea>";
+    } else if (c.type === "property_update") {
+      h += '<label for="e-to-' + c.id + '">' + escapeHtml(titleCase(ch.field)) + "</label>" +
+           '<input id="e-to-' + c.id + '" data-f="to" value="' + escapeHtml(ch.to == null ? "" : ch.to) + '">';
+    } else if (c.type === "task") {
+      h += '<label for="e-title-' + c.id + '">Task</label>' +
+           '<input id="e-title-' + c.id + '" data-f="title" value="' + escapeHtml(ch.title || "") + '">' +
+           '<label for="e-due-' + c.id + '">Due date</label>' +
+           '<input id="e-due-' + c.id + '" data-f="suggested_due" placeholder="YYYY-MM-DD" value="' +
+           escapeHtml(ch.suggested_due || "") + '">';
+    }
+    h += '<label for="e-obj-' + c.id + '">Attach to</label>' +
+         '<select id="e-obj-' + c.id + '" data-f="__target">' +
+         candidateOptions(c.resolved_object_id) + "</select>";
+    h += '<p class="locked">The evidence sentence and the risk level are not editable. ' +
+         'The evidence is what makes approving this mean something, and the risk is a rule — ' +
+         'if the rule is wrong, the rule changes.</p>';
+    return h + "</div>";
+  }
+
+  function cardHtml(c) {
+    var unmatched = c.entity_resolution !== "exact_match" && !c.resolved_object_id;
+    var decided = c.status !== "pending";
+    var h = '<div class="prop' + (decided ? " done" : "") + '" data-card="' + escapeHtml(c.id) + '">';
+
+    h += '<div class="prop-tags">' +
+           '<span class="tag risk-' + escapeHtml(c.risk) + '">' + escapeHtml(c.risk) + " risk</span>" +
+           '<span class="tag">' + escapeHtml(titleCase(c.type)) + "</span>" +
+           (unmatched ? '<span class="tag unmatched">no matching record</span>' : "") +
+         "</div>";
+
+    h += '<p class="ev"><span class="lbl">You said</span>' + escapeHtml(c.evidence || "") + "</p>";
+    h += '<div class="what">' + escapeHtml(whatLine(c)) + "</div>";
+
+    var d = detailLine(c);
+    if (d) h += '<div class="detail">' + escapeHtml(d) + "</div>";
+
+    if (unmatched) {
+      h += '<div class="onto">No record called <b>' + escapeHtml(c.entity_name) +
+           "</b> exists yet, so this is not attached to anything.</div>";
+      if (!decided) {
+        h += '<div class="pick"><select data-pick="' + escapeHtml(c.id) + '">' +
+             candidateOptions(null) + "</select></div>";
+      }
+    } else {
+      h += '<div class="onto">On <b>' + escapeHtml(targetName(c)) + "</b></div>";
+    }
+
+    if (c.impact) h += '<div class="impact">' + escapeHtml(c.impact) + "</div>";
+
+    if (editingId === c.id && !decided) h += editorHtml(c);
+
+    h += '<div class="prop-actions">';
+    if (decided) {
+      h += '<span class="verdict"><b>' +
+           (c.status === "applied" ? "Approved" : c.status === "rejected" ? "Rejected" : titleCase(c.status)) +
+           "</b>" + (c.status === "applied" ? " — your records have changed." : " — nothing was changed.") +
+           "</span>";
+    } else if (editingId === c.id) {
+      h += '<button class="btn-approve" data-act="save" data-id="' + escapeHtml(c.id) + '">Save and approve</button>' +
+           '<button class="btn-quiet" data-act="cancel" data-id="' + escapeHtml(c.id) + '">Cancel</button>';
+    } else {
+      h += '<button class="btn-approve" data-act="approve" data-id="' + escapeHtml(c.id) + '">Approve</button>' +
+           '<button class="btn-quiet" data-act="edit" data-id="' + escapeHtml(c.id) + '">Edit</button>' +
+           '<button class="btn-reject" data-act="reject" data-id="' + escapeHtml(c.id) + '">Reject</button>';
+    }
+    h += "</div>";
+
+    if (cardError[c.id]) h += '<div class="prop-err">' + escapeHtml(cardError[c.id]) + "</div>";
+
+    return h + "</div>";
+  }
+
+  function cardsHtml() {
+    if (!cards.length) return "";
+    var pending = 0, i;
+    for (i = 0; i < cards.length; i++) if (cards[i].status === "pending") pending++;
+    var h = '<div class="prop-head"><h3>Proposed changes</h3>' +
+            '<span class="count">' + cards.length + " in all" +
+            (pending ? ", " + pending + " still yours to decide" : ", all handled") + "</span>" +
+            '<span class="why">Nothing changes until you approve it</span></div>';
+    for (i = 0; i < cards.length; i++) h += cardHtml(cards[i]);
+    return h;
+  }
+
   function renderStream(pending) {
     var html = "", i, t;
-    if (!turns.length && !pending) {
+    if (!turns.length && !pending && !cards.length) {
       $("stream").innerHTML =
         '<div class="blank"><h2>Nothing on the go.</h2>' +
         '<p>Tell me what happened — a call, a meeting, a note to self. Write it the way ' +
@@ -338,6 +533,12 @@
               '<span class="dot"></span><span class="dot"></span><span class="dot"></span>' +
               "</div></div></div>";
     }
+    // The reply arrives first and the proposals follow a moment later, so this
+    // line is what fills the second wait rather than leaving it blank.
+    if (generating) {
+      html += '<div class="system">Working out what should change…</div>';
+    }
+    html += cardsHtml();
     if (closedNotice) {
       html += '<div class="system">This thread is closed. Your next message starts a new one.</div>';
     }
@@ -378,9 +579,14 @@
         // Replace the optimistic copy with what the database actually stored.
         turns[turns.length - 1] = d.user_message;
         turns.push(d.assistant_message);
+        convId = d.conversation_id;
         closedNotice = !!d.closed;
         setState(d.status, d.closed);
+        // A new thread starts with no proposals of its own.
+        if (!d.resumed) { cards = []; }
+        generating = d.generate === true;
         renderStream(false);
+        if (d.generate === true) askForProposals(d.conversation_id);
       } else {
         renderStream(false);
         systemNote(explain(res.status, d), true);
@@ -396,6 +602,158 @@
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // The second half of a go-ahead: turn the gathered facts into proposals.
+  //
+  // Fired only when the turn above reported generate: true — which the database
+  // sets only on the TRANSITION into "go ahead", never on the state. If this
+  // request were sent twice anyway, the database refuses the second one: the
+  // insert only runs while the conversation is still awaiting generation, and
+  // the same statement moves it past that. Two independent locks.
+  // ---------------------------------------------------------------------------
+  function askForProposals(conversationId) {
+    fetch(TURN_URL, {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ action: "generate", conversation_id: conversationId })
+    }).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (j) {
+        return { status: r.status, data: j };
+      });
+    }).then(function (res) {
+      var d = res.data;
+      generating = false;
+      if (d && d.ok === true) {
+        cards = Array.isArray(d.record_updates) ? d.record_updates : [];
+        candidates = Array.isArray(d.candidates) ? d.candidates : [];
+        closedNotice = !!d.closed;
+        setState(d.status, d.closed);
+        renderStream(false);
+        if (!cards.length) {
+          systemNote("Nothing in that needed a change to your records, so I have not proposed any.", false);
+        }
+      } else {
+        // REFUSAL S12. Never silence. The reply already said proposals were
+        // being worked out, so if they were not, that has to be said plainly.
+        renderStream(false);
+        systemNote(explain(res.status, d), true);
+      }
+    }).catch(function () {
+      generating = false;
+      renderStream(false);
+      systemNote("Your message is saved, but I could not reach the server to work out the proposed changes. " +
+                 "Nothing on your records has changed.", true);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // A decision. This is the one place a human judgement becomes a database
+  // write. Approve and Reject are separate functions in the database because
+  // they are different acts: approving changes a record and writes an event,
+  // rejecting changes nothing and deliberately writes no event.
+  // ---------------------------------------------------------------------------
+  function findCard(id) {
+    for (var i = 0; i < cards.length; i++) if (cards[i].id === id) return cards[i];
+    return null;
+  }
+
+  function readEditor(c) {
+    var wrap = document.querySelector('[data-card="' + c.id + '"] .edit');
+    if (!wrap) return null;
+    var out = { change: {}, target: null, changed: false };
+    var base = c.change || {}, fields = wrap.querySelectorAll("[data-f]"), i, el, f, v;
+    for (i = 0; i < fields.length; i++) {
+      el = fields[i]; f = el.getAttribute("data-f"); v = el.value;
+      if (f === "__target") { out.target = v || null; continue; }
+      out.change[f] = v;
+      if (String(base[f] == null ? "" : base[f]) !== v) out.changed = true;
+    }
+    // Carry across any part of the change the editor does not expose, so an
+    // edit never silently drops a field it simply did not show.
+    Object.keys(base).forEach(function (k) {
+      if (!(k in out.change)) out.change[k] = base[k];
+    });
+    if ((out.target || null) !== (c.resolved_object_id || null)) out.changed = true;
+    return out;
+  }
+
+  function setCardBusy(id, on) {
+    var el = document.querySelector('[data-card="' + id + '"]');
+    if (el) el.classList.toggle("busy", !!on);
+  }
+
+  function decide(id, mode) {
+    var c = findCard(id);
+    if (!c) return;
+    delete cardError[id];
+
+    var args, fn;
+    if (mode === "reject") {
+      fn = "chat_reject_record_update";
+      args = { p_record_update_id: id };
+    } else {
+      var picked = null, ed = null;
+      if (mode === "save") {
+        ed = readEditor(c);
+      } else {
+        var sel = document.querySelector('[data-pick="' + id + '"]');
+        picked = sel && sel.value ? sel.value : null;
+      }
+      fn = "chat_apply_record_update";
+      args = {
+        p_record_update_id: id,
+        // The model's proposal is never overwritten. If the reviewer changed
+        // something, the edited payload is what gets applied and the edit
+        // itself is recorded alongside it.
+        p_final_change: ed && ed.changed ? ed.change : null,
+        p_target_object_id: ed ? ed.target : picked,
+        p_edits: ed && ed.changed
+          ? { model: c.change, reviewer: ed.change,
+              target_from: c.resolved_object_id || null, target_to: ed.target || null }
+          : null
+      };
+    }
+
+    setCardBusy(id, true);
+    rpc(fn, args).then(function (d) {
+      setCardBusy(id, false);
+      if (d && d.ok === true) {
+        c.status = mode === "reject" ? "rejected" : "applied";
+        editingId = null;
+        // An approval changed a record, so the Records tab is now stale.
+        // Marking it unloaded means the next visit reads the database again
+        // rather than showing a snapshot from before the change.
+        if (mode !== "reject") recordsLoaded = false;
+        if (d.thread_closed) {
+          closedNotice = true;
+          setState("closed", true);
+        }
+        renderStream(false);
+      } else {
+        cardError[id] = explainDecision(d);
+        renderStream(false);
+      }
+    }).catch(function (err) {
+      setCardBusy(id, false);
+      cardError[id] = "Could not reach the server. Nothing was changed. (" + err.message + ")";
+      renderStream(false);
+    });
+  }
+
+  // Every refusal gets a sentence a person can act on, and every one of them
+  // says whether anything was written.
+  function explainDecision(d) {
+    var e = d && d.error;
+    if (e === "unresolved_entity")
+      return "This is not attached to any record yet, so approving it would change nothing. " +
+             "Choose a record above, or reject it. Nothing was written.";
+    if (e === "already_decided")
+      return "You have already decided this one (it is now " + (d.current_status || "decided") +
+             "). Nothing was written a second time.";
+    if (e === "not_found")
+      return "That proposed change is not visible to this account. Nothing was written.";
+    return "The change was refused (" + (e || "unknown") + "). Nothing was written.";
+  }
+
   // Every failure gets a plain sentence and, where it matters, says whether
   // the message was saved. Silence is the one thing not allowed.
   function explain(status, d) {
@@ -408,6 +766,17 @@
     if (e === "invalid_response")  return "Your message was saved. The reply came back in a shape the database refused to store, so the conversation was left untouched.";
     if (e === "conversation_not_found") return "Your message was saved, but the conversation it belongs to is already closed. Start a new one.";
     if (e === "server_not_configured")  return "The server is missing its Anthropic key. Nothing was saved.";
+    if (e === "not_awaiting_generation")
+      return "This conversation is not waiting on proposed changes, so none were prepared. " +
+             "That usually means they have already been worked out once. Nothing was written twice.";
+    if (e === "generation_failed")
+      return "Your message is saved and the conversation is unchanged, but working out the proposed changes failed. " +
+             "Nothing on your records has changed. Say \"go ahead\" again in a new thread to retry.";
+    if (e === "invalid_generation")
+      return "The proposed changes came back in a shape the database refused to store, so none were written " +
+             "and the conversation was left where it was.";
+    if (e === "insert_failed")
+      return "The proposed changes could not be saved. Nothing on your records has changed.";
     return "Something went wrong (" + (e || ("HTTP " + status)) + "). Nothing was changed.";
   }
 
@@ -461,8 +830,8 @@
     $("records").innerHTML = html;
   }
 
-  function loadRecords() {
-    if (recordsLoaded) return;
+  function loadRecords(force) {
+    if (recordsLoaded && !force) return;
     recordsLoaded = true;
     apiGet("objects?select=id,object_type,name,properties,workspace_id&order=object_type.asc,name.asc")
       .then(renderObjects)
@@ -489,9 +858,11 @@
   function showApp() {
     $("view-login").hidden = true;
     $("view-app").classList.add("on");
-    turns = []; closedNotice = false; recordsLoaded = false;
+    turns = []; cards = []; candidates = []; closedNotice = false;
+    recordsLoaded = false; editingId = null; cardError = {}; generating = false;
     renderStream(false);
-    // ONE request: who I am, my open conversation, and its whole transcript.
+    // ONE request: who I am, my open conversation, its whole transcript, any
+    // proposals still waiting on it, and the records a picker could attach to.
     rpc("chat_load_open", {}).then(function (d) {
       if (!d || d.ok !== true) {
         $("whoami").textContent = "signed in";
@@ -502,6 +873,9 @@
       }
       $("whoami").textContent = d.who ? (d.who.display_name + " · " + d.who.workspace_id) : "signed in";
       turns = Array.isArray(d.turns) ? d.turns : [];
+      cards = Array.isArray(d.record_updates) ? d.record_updates : [];
+      candidates = Array.isArray(d.candidates) ? d.candidates : [];
+      convId = d.conversation_id || null;
       setState(d.status, false);
       renderStream(false);
       if (turns.length) {
@@ -541,7 +915,7 @@
 
   $("logoutBtn").addEventListener("click", function () {
     signOut();
-    turns = [];
+    turns = []; cards = []; candidates = [];
     showLogin("Signed out.");
   });
 
@@ -554,7 +928,19 @@
     $("tabRecords").classList.add("sel"); $("tabChat").classList.remove("sel");
     $("paneRecords").hidden = false; $("paneChat").hidden = true;
     $("composer").style.display = "none";
-    loadRecords();
+    loadRecords(false);
+  });
+
+  // One listener for every card button, so cards can be re-rendered freely.
+  $("stream").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-act]") : null;
+    if (!b) return;
+    var id = b.getAttribute("data-id"), act = b.getAttribute("data-act");
+    if (act === "edit")        { editingId = id; delete cardError[id]; renderStream(false); }
+    else if (act === "cancel") { editingId = null; renderStream(false); }
+    else if (act === "approve") decide(id, "approve");
+    else if (act === "save")    decide(id, "save");
+    else if (act === "reject")  decide(id, "reject");
   });
 
   // R5, at the surface as well as in the database: an empty box cannot be sent.
