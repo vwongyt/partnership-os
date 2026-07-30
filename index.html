@@ -414,9 +414,49 @@
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // KEEP THE SESSION ALIVE FOR AS LONG AS THE TAB IS OPEN.
+  //
+  // Until now the token was refreshed at ONE moment: page load. A Supabase
+  // access token lasts an hour. A tab left open outlives it, and then every
+  // call fails — which is exactly what happened to the product owner on
+  // 30 July: his token had expired 14 minutes earlier, his message was captured
+  // and answered, and the generation call came back 401. The page said
+  // "Something went wrong (HTTP 401)", which is true and useless.
+  //
+  // So: check before every call, not once at boot. One refresh in flight at a
+  // time, shared by every caller, so six card decisions do not fire six
+  // refreshes and race each other.
+  // ---------------------------------------------------------------------------
+  var refreshing = null;
+
+  function validSession() {
+    if (!session) return Promise.reject(new Error("not_signed_in"));
+    if (!expired(session)) return Promise.resolve(session);
+    if (!session.refresh_token) return Promise.reject(new Error("session_expired"));
+    if (!refreshing) {
+      refreshing = refresh(session.refresh_token).then(function (res) {
+        refreshing = null;
+        if (res.ok && res.data && res.data.access_token) { saveSession(res.data); return session; }
+        throw new Error("session_expired");
+      }, function (e) { refreshing = null; throw e; });
+    }
+    return refreshing;
+  }
+
+  // A session that cannot be revived is not an error to report in the
+  // transcript — it is a sign-in screen. Say why, so it does not look like the
+  // app broke.
+  function sessionDead() {
+    clearSession();
+    showLogin("Your session expired while the page was open. Please sign in again — nothing was lost.");
+  }
+
   function rpc(fn, args) {
-    return fetch(SUPABASE_URL + "/rest/v1/rpc/" + fn, {
-      method: "POST", headers: authHeaders(), body: JSON.stringify(args || {})
+    return validSession().then(function () {
+      return fetch(SUPABASE_URL + "/rest/v1/rpc/" + fn, {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(args || {})
+      });
     }).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (j) {
         if (!r.ok) throw new Error((j && j.message) || ("HTTP " + r.status));
@@ -426,7 +466,8 @@
   }
 
   function apiGet(path) {
-    return fetch(SUPABASE_URL + "/rest/v1/" + path, { headers: authHeaders() })
+    return validSession()
+      .then(function () { return fetch(SUPABASE_URL + "/rest/v1/" + path, { headers: authHeaders() }); })
       .then(function (r) {
         return r.json().catch(function () { return null; }).then(function (j) {
           if (!r.ok) throw new Error((j && j.message) || ("HTTP " + r.status));
@@ -997,8 +1038,10 @@
     turns.push({ role: "user", content: text, created_at: new Date().toISOString() });
     renderStream(true);
 
-    fetch(TURN_URL, {
-      method: "POST", headers: authHeaders(), body: JSON.stringify({ message: text })
+    validSession().then(function () {
+      return fetch(TURN_URL, {
+        method: "POST", headers: authHeaders(), body: JSON.stringify({ message: text })
+      });
     }).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (j) {
         return { status: r.status, data: j };
@@ -1025,8 +1068,9 @@
         renderStream(false);
         systemNote(explain(res.status, d), true);
       }
-    }).catch(function () {
+    }).catch(function (err) {
       renderStream(false);
+      if (err && /session_expired|not_signed_in/.test(err.message)) { sessionDead(); return; }
       systemNote("Could not reach the server. Your message was not saved — try again.", true);
     }).then(function () {
       busy = false;
@@ -1050,9 +1094,11 @@
   // the same statement moves it past that. Two independent locks.
   // ---------------------------------------------------------------------------
   function askForProposals(conversationId) {
-    fetch(TURN_URL, {
-      method: "POST", headers: authHeaders(),
-      body: JSON.stringify({ action: "generate", conversation_id: conversationId })
+    validSession().then(function () {
+      return fetch(TURN_URL, {
+        method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ action: "generate", conversation_id: conversationId })
+      });
     }).then(function (r) {
       return r.json().catch(function () { return null; }).then(function (j) {
         return { status: r.status, data: j };
@@ -1075,9 +1121,10 @@
         renderStream(false);
         systemNote(explain(res.status, d), true);
       }
-    }).catch(function () {
+    }).catch(function (err) {
       generating = false;
       renderStream(false);
+      if (err && /session_expired|not_signed_in/.test(err.message)) { sessionDead(); return; }
       systemNote("Your message is saved, but I could not reach the server to work out the proposed changes. " +
                  "Nothing on your records has changed.", true);
     });
@@ -1172,6 +1219,7 @@
       return false;
     }).catch(function (err) {
       setCardBusy(id, false);
+      if (err && /session_expired|not_signed_in/.test(err.message)) { sessionDead(); return false; }
       cardError[id] = "Could not reach the server. Nothing was changed. (" + err.message + ")";
       renderStream(false, true);
       return false;
@@ -1329,6 +1377,9 @@
   // the message was saved. Silence is the one thing not allowed.
   function explain(status, d) {
     var e = d && d.error;
+    if (status === 401)
+      return "Your sign-in had expired, so that did not go through. Nothing was written. " +
+             "Send it again — the session has been renewed.";
     if (e === "empty_message")   return "There was nothing in that message, so nothing was saved.";
     if (e === "no_workspace")    return "This account is signed in but has no person-record in a workspace, so it cannot read or write anything. That is a correct refusal, not a fault.";
     if (e === "not_signed_in")   return "Your session has expired. Sign out and back in.";
