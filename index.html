@@ -175,7 +175,12 @@
           color:var(--ink-3);margin-bottom:7px}
   .q h3{margin:0 0 8px;font-size:17px;font-weight:600;letter-spacing:-0.01em}
   .q-why{margin:0 0 14px;font-size:14px;color:var(--ink-2)}
-  .q-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  /* Sticky, so a question taller than the window still has its answers within
+     reach. Scrolling to read should never cost a second scroll to act — which
+     is the same complaint that produced bringQuestionIntoView, one case further
+     on: there, the question was off screen; here, only its buttons are. */
+  .q-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+             position:sticky;bottom:0;background:var(--card);padding:10px 0 2px}
   .btn-alt{background:#fff;color:var(--ink);border-color:var(--line);padding:7px 14px;font-size:14px}
   .btn-alt:hover{border-color:var(--accent);color:var(--accent)}
   .remaining{font-size:12.5px;color:var(--ink-3);margin:2px 0 16px}
@@ -184,6 +189,23 @@
   .dlbl{font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);
         font-weight:600;margin:12px 0 3px}
   .q .detail{margin-bottom:12px}
+  .lands{margin:11px 0 0;font-size:14px;color:var(--ink-2)}
+  .lands b{color:var(--ink);font-weight:600}
+  .btn-link{background:none;border:none;padding:0 0 0 6px;color:var(--accent);font-size:13.5px;
+            text-decoration:underline;text-underline-offset:2px}
+  .btn-link:hover{filter:brightness(1.2)}
+
+  /* The closing summary. A diary entry, not a status line. */
+  .closing{background:var(--card);border:1px solid var(--accent-line);border-left:4px solid var(--accent);
+           border-radius:var(--radius);padding:18px 20px;margin:6px 0 14px}
+  .closing h3{margin:0 0 12px;font-size:17px;font-weight:600;letter-spacing:-0.01em}
+  .closing ul{margin:0 0 12px;padding:0;list-style:none}
+  .closing li{padding:6px 0;border-bottom:1px solid var(--line);font-size:14.5px}
+  .closing li:last-child{border-bottom:none}
+  .closing li em{font-style:normal;color:var(--accent);font-weight:550}
+  .closing p{margin:0}
+  .closing .drops{font-size:13.5px;color:var(--ink-2);padding-top:10px;border-top:1px solid var(--line)}
+  .closing .next{margin-top:12px;font-size:13px;color:var(--ink-3)}
   .evlist{margin:0;padding:0;list-style:none}
   .evlist li{margin-bottom:5px}
   .evlist li:last-child{margin-bottom:0}
@@ -316,6 +338,8 @@
   var groupError = {};     // group key -> why the last parent answer failed
   var notices = [];        // sentences the flow has said out loud, in order
   var escapeBusy = false;
+  var retargeting = {};    // card id -> the editor's record picker was asked for
+  var createdNames = {};   // record name -> created by "Add them" in this thread
 
   // ---------------------------------------------------------------------------
   // Session storage — unchanged from Session 4b. Inherited, not rebuilt.
@@ -497,9 +521,33 @@
            '<input id="e-due-' + c.id + '" data-f="suggested_due" placeholder="YYYY-MM-DD" value="' +
            escapeHtml(ch.suggested_due || "") + '">';
     }
-    h += '<label for="e-obj-' + c.id + '">Attach to</label>' +
-         '<select id="e-obj-' + c.id + '" data-f="__target">' +
-         candidateOptions(c.resolved_object_id) + "</select>";
+    // WHERE IT LANDS IS ALREADY SETTLED, so do not ask again.
+    //
+    // This used to be an always-open dropdown listing every record in the
+    // workspace, defaulted to the change's own resolved record — which for
+    // anything under a parent question is null, so it opened blank and read as
+    // a question you had to answer. The product owner hit this on the first
+    // real run: "why does it need to do that? and when i click on it, i see
+    // many entries inside." He was right. The parent question owns attachment
+    // now (8.6); re-asking it here is the card version leaking through.
+    //
+    // Blueprint 8.4 still holds — an edit CAN change the record — so the
+    // control stays, one click away, defaulted to the settled answer and never
+    // blank. It is shown, not asked.
+    var t = targetFor(c), tname = null, i;
+    if (t) {
+      tname = c.resolved_object_name;
+      for (i = 0; i < candidates.length; i++) if (candidates[i].id === t) tname = candidates[i].name;
+    }
+    if (t && !retargeting[c.id]) {
+      h += '<p class="lands">This will land on <b>' + escapeHtml(tname || c.entity_name || "the record above") +
+           '</b> <button type="button" class="btn-link" data-act="retarget" data-id="' +
+           escapeHtml(c.id) + '">use a different record</button></p>';
+    } else {
+      h += '<label for="e-obj-' + c.id + '">Attach to</label>' +
+           '<select id="e-obj-' + c.id + '" data-f="__target">' +
+           candidateOptions(t) + "</select>";
+    }
     h += '<p class="locked">The evidence sentence and the risk level are not editable. ' +
          'The evidence is what makes approving this mean something, and the risk is a rule — ' +
          'if the rule is wrong, the rule changes.</p>';
@@ -756,13 +804,67 @@
     return h + "</div>";
   }
 
+  // What a finished thread should say. Blueprint 8.6 ends with "the thread
+  // wraps up"; Session 6 read that literally and printed one flat line — "this
+  // thread is closed" — which tells you it is over without telling you what
+  // happened. The product owner's words on his first real run: "when i finish
+  // the action, i think a summary closing of what has been done is better."
+  //
+  // He is describing a diary entry. So: grouped by the record it happened to,
+  // in the owner's language, counting only what actually changed — and saying
+  // plainly what was dropped, because a rejection is a decision he made and
+  // should be able to see, not an absence.
+  function phrase(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
+
+  function closingHtml() {
+    var byRecord = {}, order = [], dropped = [], i, c, name, b;
+    for (i = 0; i < cards.length; i++) {
+      c = cards[i];
+      name = c.resolved_object_name || c.entity_name || "an unnamed record";
+      if (c.status === "rejected") { dropped.push(whatLine(c)); continue; }
+      if (c.status !== "applied") continue;
+      if (!byRecord[name]) { byRecord[name] = { notes: 0, tasks: 0, props: [] }; order.push(name); }
+      b = byRecord[name];
+      if (c.type === "note") b.notes++;
+      else if (c.type === "task") b.tasks++;
+      else if (c.type === "property_update") {
+        b.props.push(titleCase((c.change || {}).field) + " set to “" + ((c.change || {}).to || "") + "”");
+      }
+    }
+
+    var h = '<div class="closing"><h3>That’s this one wrapped up.</h3>';
+    if (!order.length) {
+      h += "<p>Nothing on your records changed — everything here was dropped.</p>";
+    } else {
+      h += "<ul>";
+      for (i = 0; i < order.length; i++) {
+        b = byRecord[order[i]];
+        var bits = [];
+        if (b.notes) bits.push(phrase(b.notes, "note") + " added");
+        if (b.tasks) bits.push(phrase(b.tasks, "task") + " created");
+        if (b.props.length) bits.push(b.props.join(", "));
+        h += "<li><b>" + escapeHtml(order[i]) + "</b>" +
+             (createdNames[order[i]] ? " — <em>added as a new record</em>" : "") +
+             " · " + escapeHtml(bits.join(" · ")) + "</li>";
+      }
+      h += "</ul>";
+    }
+    if (dropped.length) {
+      h += '<p class="drops">' + escapeHtml(phrase(dropped.length, "change") +
+           " dropped, nothing changed: " + dropped.join("; ")) + "</p>";
+    }
+    h += '<p class="next">Every one of these is on your records now, with an event recording what it ' +
+         'looked like before and after. Your next message starts a new thread.</p>';
+    return h + "</div>";
+  }
+
   function cardsHtml() {
     if (!cards.length) return "";
     var h = shapeHtml() + settledHtml(), i;
     for (i = 0; i < notices.length; i++) h += '<div class="wrap">' + escapeHtml(notices[i]) + "</div>";
 
     var step = currentStep();
-    if (!step) return h;
+    if (!step) return h + closingHtml();
 
     var left = pendingCount();
     h += '<p class="remaining">' + left + " left to decide.</p>";
@@ -804,13 +906,43 @@
       html += '<div class="system">Working out what should change…</div>';
     }
     html += cardsHtml();
-    if (closedNotice) {
+    // Only when there is no closing summary — otherwise this repeats its last
+    // line in a flatter voice.
+    if (closedNotice && !(cards.length && !currentStep())) {
       html += '<div class="system">This thread is closed. Your next message starts a new one.</div>';
     }
     var p = $("paneChat");
     var was = p.scrollTop;
     $("stream").innerHTML = html;
     p.scrollTop = keepScroll ? was : p.scrollHeight;
+    if (keepScroll) bringQuestionIntoView();
+  }
+
+  // Hold the reader in place, but not at the cost of hiding the thing they now
+  // have to answer. keepScroll exists because approving the third card of six
+  // used to throw the page to the end of the transcript (found by the product
+  // owner, 30 July). One question at a time changed the arithmetic: the settled
+  // list grows by a line with every answer, so the NEXT question drifts below
+  // the fold and has to be scrolled to — once per decision, every time. Found
+  // by the product owner on his first real run of this surface, same day.
+  //
+  // So: don't jump anywhere if the question is already comfortably in view.
+  // Otherwise move the minimum needed to show it, with a little headroom so it
+  // never sits flush against an edge. A question taller than the pane is
+  // aligned to its top, because its first line is the part you read first.
+  function bringQuestionIntoView() {
+    var p = $("paneChat"), q = $("stream").querySelector(".q");
+    if (!q || p.hidden) return;
+    var qr = q.getBoundingClientRect(), pr = p.getBoundingClientRect();
+    var pad = 14, delta = 0;
+    if (qr.height >= pr.height - pad * 2) {
+      if (qr.top < pr.top - 1 || qr.top > pr.top + pad) delta = qr.top - pr.top - pad;
+    } else if (qr.top < pr.top + pad) {
+      delta = qr.top - pr.top - pad;
+    } else if (qr.bottom > pr.bottom - pad) {
+      delta = qr.bottom - pr.bottom + pad;
+    }
+    if (delta) p.scrollTop += delta;
   }
 
   function systemNote(text, bad) {
@@ -852,7 +984,7 @@
         // the previous thread's answers to parent questions.
         if (!d.resumed) {
           cards = []; attached = {}; skipped = {}; pickingFor = null;
-          groupError = {}; notices = [];
+          groupError = {}; notices = []; retargeting = {}; createdNames = {};
         }
         generating = d.generate === true;
         renderStream(false);
@@ -987,7 +1119,7 @@
       setCardBusy(id, false);
       if (d && d.ok === true) {
         c.status = mode === "reject" ? "rejected" : "applied";
-        editingId = null;
+        editingId = null; delete retargeting[id];
         // An approval changed a record, so the Records tab is now stale.
         // Marking it unloaded means the next visit reads the database again
         // rather than showing a snapshot from before the change.
@@ -1055,6 +1187,7 @@
       setGroupBusy(k, false);
       if (d && d.ok === true && d.record) {
         candidates.push({ id: d.record.id, name: d.record.name, object_type: d.record.object_type });
+        createdNames[d.record.name] = true;
         attachRecord(k, d.record.id, d.record.name, true);
         recordsLoaded = false;
         return;
@@ -1263,6 +1396,7 @@
     turns = []; cards = []; candidates = []; closedNotice = false;
     recordsLoaded = false; editingId = null; cardError = {}; generating = false;
     attached = {}; skipped = {}; pickingFor = null; groupError = {}; notices = []; escapeBusy = false;
+    retargeting = {}; createdNames = {};
     renderStream(false);
     // ONE request: who I am, my open conversation, its whole transcript, any
     // proposals still waiting on it, and the records a picker could attach to.
@@ -1362,8 +1496,9 @@
     if (!b) return;
     var id = b.getAttribute("data-id"), act = b.getAttribute("data-act");
     if (act === "escape")      doTheLot();
-    else if (act === "edit")   { editingId = id; delete cardError[id]; renderStream(false, true); }
-    else if (act === "cancel") { editingId = null; renderStream(false, true); }
+    else if (act === "edit")   { editingId = id; delete cardError[id]; delete retargeting[id]; renderStream(false, true); }
+    else if (act === "retarget") { retargeting[id] = true; renderStream(false, true); }
+    else if (act === "cancel") { editingId = null; delete retargeting[id]; renderStream(false, true); }
     else if (act === "approve") decide(id, "approve");
     else if (act === "save")    decide(id, "save");
     else if (act === "reject")  decide(id, "reject");
