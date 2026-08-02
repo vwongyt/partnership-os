@@ -862,8 +862,18 @@
       h += '<p class="drops">' + escapeHtml(phrase(dropped.length, "change") +
            " dropped, nothing changed: " + dropped.join("; ")) + "</p>";
     }
+    // SESSION 12, 2 AUGUST. This sentence used to be unconditional, and it was
+    // written when applying ALWAYS closed the thread. F7 made a thread holding
+    // facts you have not acted on survive — so the page was telling you a new
+    // thread would start when your next message would in fact continue this
+    // one. Found by the product owner's own run. It now says which it is, read
+    // off what the database actually did rather than assumed.
     h += '<p class="next">Every one of these is on your records now, with an event recording what it ' +
-         "looked like before and after. Your next message starts a new thread.</p>";
+         "looked like before and after. " +
+         (closedNotice
+            ? "Your next message starts a new thread."
+            : "I am still holding something else you told me, so this thread stays open — " +
+              "your next message carries on here.") + "</p>";
     return h + "</div>";
   }
 
