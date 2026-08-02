@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+—<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -753,6 +753,44 @@
     return out;
   }
 
+  // SESSION 12 (F-8). A clause whose name more than one record answers to.
+  // Read from `candidates` rather than from the `ambiguous` label, because the
+  // candidates are what makes the choice answerable: a card claiming to be
+  // ambiguous with nothing to choose between would be F9's defect again, and
+  // this way that card simply is not one.
+  function candidatesOf(c) {
+    return (c && Array.isArray(c.candidates)) ? c.candidates : [];
+  }
+  function ambiguousCards() {
+    return setCards().filter(function (c) {
+      return !c.resolved_object_id && candidatesOf(c).length > 1;
+    });
+  }
+
+  // One button per record, each saying what it belongs to. The two words are
+  // identical — the parent is the only thing that tells them apart, which is
+  // exactly what F9 established for reading and this is for writing.
+  function pickHtml(c) {
+    var cs = candidatesOf(c), i, x;
+    var h = '<div class="q" data-card="' + escapeHtml(c.id) + '">' +
+            '<div class="q-kind">Which one?</div>' +
+            "<h3>" + escapeHtml(clauseOf(c)) + "</h3>" +
+            '<p class="q-why">You have ' + cs.length + ' records called <b>' +
+            escapeHtml(String(c.entity_name || "")) + "</b>. I will not pick for you — " +
+            "whichever I chose would be a guess about your business that you could not see.</p>";
+    h += '<div class="q-actions">';
+    for (i = 0; i < cs.length; i++) {
+      x = cs[i];
+      h += '<button class="btn-approve" data-act="pick" data-id="' + escapeHtml(c.id) +
+           '" data-target="' + escapeHtml(String(x.id)) + '">Yes — the one under ' +
+           escapeHtml(String(x.belongs_to || "nothing")) + "</button>";
+    }
+    h += '<button class="btn-reject" data-act="reject" data-id="' + escapeHtml(c.id) +
+         '">Neither — drop it</button></div>';
+    if (cardError[c.id]) h += '<div class="prop-err">' + escapeHtml(cardError[c.id]) + "</div>";
+    return h + "</div>";
+  }
+
   function paragraphHtml() {
     var s = setCards(), i, t, parts = [];
     if (!s.length) return "";
@@ -780,7 +818,18 @@
     h += evidenceHtml(s);
 
     var missing = newRecordsUnnamed();
-    if (missing.length) {
+    var amb = ambiguousCards();
+    if (amb.length) {
+      // SESSION 12 (F-8). The set cannot be approved while one of its clauses
+      // is about a name more than one of his records answers to, and the
+      // database refuses it in the same statement as the write. Asking for a
+      // yes the function will reject would be F2's defect again, so the yes is
+      // not offered — and, unlike a bare refusal, the choice is right here.
+      h += '<div class="rb-err">One of these is about a name <b>two of your records answer ' +
+           'to</b>, and I am not going to guess which you meant — so nothing here can be ' +
+           'approved until you tell me. Pick below and I will ask you about the rest.</div>';
+      for (i = 0; i < amb.length; i++) h += pickHtml(amb[i]);
+    } else if (missing.length) {
       h += '<div class="rb-err">I am not going to ask you to approve this as it stands. ' +
            escapeHtml(missing.join(", ")) +
            (missing.length === 1 ? " is not in your records" : " are not in your records") +
@@ -1093,6 +1142,33 @@
                "</button>";
         }
         h += '<span class="rb-or">or leave it and tell me about them in a message</span></div>';
+      } else if (g.blocked_reason === "record_is_ambiguous") {
+        // SESSION 12 (F-8). The same choice the conversation offers, offered
+        // here, because a backlog group that only said "I cannot decide this
+        // one here" would be a dead end again — the thing S12-3 fixed for
+        // naming and never had to fix for this, because this refusal did not
+        // exist. `records_to_disambiguate` comes from the same predicate
+        // chat_apply_set refuses on.
+        var dis = g.records_to_disambiguate || [];
+        h += '<div class="grp-held">' +
+             (dis.length === 1
+               ? "One of these is about a name more than one of your records answers to. "
+               : String(dis.length) + " of these are about names more than one of your records " +
+                 "answers to. ") +
+             "I will not pick for you — whichever I chose would be a guess about your business " +
+             "you could not see.</div>";
+        for (var di = 0; di < dis.length; di++) {
+          var dcs = (dis[di].candidates || []);
+          h += '<div class="grp-actions">';
+          for (var dj = 0; dj < dcs.length; dj++) {
+            h += '<button class="btn-approve" data-act="pick" data-id="' +
+                 escapeHtml(String(dis[di].record_update_id)) + '" data-target="' +
+                 escapeHtml(String(dcs[dj].id)) + '">' +
+                 escapeHtml(String(dis[di].name || "")) + " — the one under " +
+                 escapeHtml(String(dcs[dj].belongs_to || "nothing")) + "</button>";
+          }
+          h += "</div>";
+        }
       } else {
         h += '<div class="grp-held">' +
              (g.blocked_reason === "item_not_applicable"
@@ -1686,9 +1762,30 @@
   // are the per-item functions from Session 6, unchanged: approving changes a
   // record and writes an event, rejecting changes nothing and deliberately
   // writes no event.
-  function decide(id, mode) {
+  // `chosenTarget` is only ever passed by the F-8 chooser, and only ever an id
+  // the database itself handed back as a candidate — chat_apply_record_update
+  // refuses any other (S12-34), so a tampered button changes nothing.
+  // Which backlog group an item belongs to, so a refusal is drawn on the card
+  // it came from rather than nowhere.
+  function findGroupOf(itemId) {
+    var i, j, items;
+    for (i = 0; i < groups.length; i++) {
+      items = groups[i].records_to_disambiguate || [];
+      for (j = 0; j < items.length; j++)
+        if (String(items[j].record_update_id) === String(itemId))
+          return groups[i].conversation_id;
+    }
+    return "";
+  }
+
+  function decide(id, mode, chosenTarget) {
     var c = findCard(id);
-    if (!c) return;
+    // The F-8 chooser also appears on BACKLOG groups, whose items are not in
+    // `cards` at all — so a missing card is normal there and must not silently
+    // do nothing. Everything below that touches `c` is guarded, and the
+    // backlog case re-reads the list afterwards rather than patching it.
+    var fromBacklog = !c;
+    if (!c && !chosenTarget) return;
     delete cardError[id];
     var fn, args;
     if (mode === "reject") {
@@ -1697,18 +1794,24 @@
     } else {
       fn = "chat_apply_record_update";
       args = { p_record_update_id: id, p_final_change: null,
-               p_target_object_id: targetFor(c), p_edits: null };
+               p_target_object_id: chosenTarget || targetFor(c), p_edits: null };
     }
     setCardBusy(id, true);
     return rpc(fn, args).then(function (d) {
       setCardBusy(id, false);
       if (d && d.ok === true) {
-        c.status = mode === "reject" ? "rejected" : "applied";
+        if (c) c.status = mode === "reject" ? "rejected" : "applied";
         if (mode !== "reject") recordsLoaded = false;
-        if (d.thread_closed) { closedNotice = true; setState("closed", true); }
+        if (d.thread_closed && c) { closedNotice = true; setState("closed", true); }
+        if (fromBacklog) {
+          // S11-8: after a write, ask the database again rather than crossing
+          // the item off a list that was true when the page loaded.
+          return loadGroups().then(function () { renderStream(false, true); return true; });
+        }
         renderStream(false, true);
         return true;
       }
+      if (fromBacklog) groupErr[findGroupOf(id)] = explainDecision(d);
       cardError[id] = explainDecision(d);
       renderStream(false, true);
       return false;
@@ -1739,6 +1842,14 @@
     if (e === "unresolved_entity")
       return "One of those changes is not attached to any record, so applying it would change " +
              "nothing. None of the set was applied.";
+    // SESSION 12 (F-8). Should be unreachable from this page, because the yes
+    // is not offered while anything is ambiguous — kept because "unreachable"
+    // is a claim about the page, and the refusal is a fact about the database.
+    if (e === "record_is_ambiguous")
+      return "One of those changes names something more than one of your records answers to (" +
+             escapeHtml(((d && d.names) || []).join(", ")) + "), and I will not guess which you " +
+             "meant. None of the set was applied and nothing was changed. Reload and I will ask " +
+             "you which one.";
     if (e === "nothing_pending")
       return "There was nothing still waiting on a decision, so nothing was applied a second time.";
     if (e === "no_workspace")
@@ -1978,6 +2089,7 @@
     else if (act === "group")   decideGroup(id);
     else if (act === "addrec")  nameRecord(id, b.getAttribute("data-name"),
                                                b.getAttribute("data-type"));
+    else if (act === "pick")    decide(id, "approve", b.getAttribute("data-target"));
   });
 
   // R5, at the surface as well as in the database: an empty box cannot be sent.
