@@ -718,14 +718,37 @@
   // of that decision is this check: the paragraph must NAME the record and say
   // it is new. If a clause for a new record does not name it, the yes is not
   // offered at all. Asking dishonestly is worse than not asking.
+  //
+  // SESSION 12 (F-5). The unit this guard tests is the PARAGRAPH, because the
+  // paragraph is what he reads. He is shown one assembled block of prose, not a
+  // list of sentences, so a record named once anywhere in it has been named to
+  // him — and a second clause about that same record no longer has to repeat
+  // the name, any more than a person would. Testing each clause ALONE withheld
+  // the yes from a paragraph that did name every new record, and then told him
+  // "the summary above does not say so", which was false. The guarantee is
+  // unchanged: nothing gets created without being named in what he read. Only
+  // the unit was wrong.
+  function paragraphText() {
+    var s = setCards(), i, t, out = [];
+    for (i = 0; i < s.length; i++) { t = clauseOf(s[i]); if (t) out.push(t); }
+    return out.join(" ");
+  }
   function newRecordsUnnamed() {
-    var out = [], s = setCards(), i, c, nm;
+    var out = [], seen = {}, s = setCards(), i, c, nm, key;
+    var para = paragraphText().toLowerCase();
     for (i = 0; i < s.length; i++) {
       c = s[i];
       if (c.resolved_object_id) continue;
       nm = String(c.entity_name || "").trim();
-      if (!nm) { out.push("an unnamed record"); continue; }
-      if (clauseOf(c).toLowerCase().indexOf(nm.toLowerCase()) === -1) out.push(nm);
+      // No name at all is a different failure and still stops the yes: there is
+      // nothing that COULD have been named.
+      if (!nm) {
+        if (!seen["k:\u0000"]) { seen["k:\u0000"] = 1; out.push("an unnamed record"); }
+        continue;
+      }
+      key = nm.toLowerCase();
+      if (seen["k:" + key]) continue;
+      if (para.indexOf(key) === -1) { seen["k:" + key] = 1; out.push(nm); }
     }
     return out;
   }
