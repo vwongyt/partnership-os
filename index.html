@@ -622,11 +622,22 @@
     return c.resolved_object_name || c.entity_name || "an unnamed record";
   }
 
+  // SESSION 12 (F-11). A change that ADDS a field the record has never had says
+  // so, everywhere the change is described. On 2 August a deal was proposed to
+  // be marked won on a field called `stage`, beside a real field called
+  // `status` — which would have left it won on one and open on the other, with
+  // nothing on screen to notice. Creating a field is legitimate (his renewal
+  // date on the same afternoon was exactly that); creating one INVISIBLY is not.
+  function addsNewField(c) {
+    return c.type === "property_update" && c.field_is_new === true;
+  }
+
   function whatLine(c) {
     var ch = c.change || {};
     if (c.type === "note") return "Add a note to " + targetName(c);
     if (c.type === "property_update")
-      return "Set " + titleCase(ch.field) + " to “" + (ch.to == null ? "" : ch.to) + "”";
+      return (addsNewField(c) ? "Add a new field " : "Set ") +
+             titleCase(ch.field) + " to “" + (ch.to == null ? "" : ch.to) + "”";
     if (c.type === "task") return "Create a task — " + (ch.title || c.summary || "");
     return c.summary || c.type;
   }
@@ -635,6 +646,8 @@
     var ch = c.change || {}, bits = [];
     if (c.type === "note") return ch.note_text || "";
     if (c.type === "property_update") {
+      if (addsNewField(c))
+        return "This record has no " + titleCase(ch.field) + " today — approving adds it.";
       if (ch.from != null && ch.from !== "") return "Currently “" + ch.from + "”.";
       return "";
     }
@@ -812,6 +825,25 @@
            'my own read-back of what you said — I did not write a sentence for it at the ' +
            'time. It is still built from the changes themselves, but read it a little ' +
            'more carefully than usual.</div>';
+    }
+    // F-11, in words, every time it is true. The clause the model wrote will
+    // usually not mention that a field is new, because the model does not
+    // reliably know; the row does, so the page says it from the row.
+    var newFields = [];
+    for (i = 0; i < s.length; i++)
+      if (addsNewField(s[i]) && s[i].change && s[i].change.field)
+        newFields.push(titleCase(s[i].change.field) + " on " + targetName(s[i]));
+    if (newFields.length) {
+      var marked = [];
+      for (i = 0; i < newFields.length; i++) marked.push("<b>" + escapeHtml(newFields[i]) + "</b>");
+      h += '<div class="grp-recon">' +
+           (newFields.length === 1
+              ? "One of these adds a field the record has never had — "
+              : "Some of these add fields the records have never had — ") +
+           marked.join(", ") +
+           ". That is allowed and sometimes right, but it is worth a second look: a value on a new " +
+           "field sits <i>beside</i> the record\u2019s existing ones rather than replacing any of them." +
+           "</div>";
     }
     h += '<p class="rb-prose">' + parts.join(" ") + "</p>";
 
