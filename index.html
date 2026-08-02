@@ -425,6 +425,10 @@
   var groups = [];         // undecided items, grouped by their conversation
   var groupBusy = {};      // conversation_id -> true while a decision is in flight
   var groupErr = {};       // conversation_id -> a sentence
+  var heldThreads = [];    // SESSION 12 (F7): open threads still holding facts,
+                           // with nothing pending. They cannot close over what
+                           // he told them, so they must be visible somewhere.
+  var nameBusy = {};       // "conv|name|type" -> true while a naming is in flight
   var cards = [];          // proposed changes for the OPEN conversation only
   var candidates = [];     // records the picker can attach an unmatched item to
   var convId = null;
@@ -685,6 +689,19 @@
     return String(c.read_back || c.summary || whatLine(c) || "").trim();
   }
 
+  // SESSION 12 (F3). Until now the clause and its stand-in were the same string
+  // and nothing could tell them apart: chat_insert_record_updates wrote the
+  // SUMMARY into `read_back` when the model wrote no clause, so the "I
+  // reconstructed this" banner could never fire. Absence is now stored as
+  // absence, and `read_back_written` is written from the row at insert time.
+  // The substitution above still happens — he must see a sentence — but it is
+  // LABELLED rather than passed off, which is the difference S11-6 asks for.
+  function clauseIsReconstructed(c) { return c.read_back_written === false; }
+  function anyReconstructed(list) {
+    for (var i = 0; i < list.length; i++) if (clauseIsReconstructed(list[i])) return true;
+    return false;
+  }
+
   // Where a change should land. A change that resolved goes to its record; a
   // change whose record the yes has just created goes to the record the yes
   // created. Never a guess.
@@ -727,8 +744,15 @@
     }
 
     var h = '<div class="readback' + (setBusy ? " busy" : "") + '">' +
-            '<div class="rb-kind">Here is what I understood</div>' +
-            '<p class="rb-prose">' + parts.join(" ") + "</p>";
+            '<div class="rb-kind">Here is what I understood</div>';
+    // F3, in words, every time it is true.
+    if (anyReconstructed(s)) {
+      h += '<div class="grp-recon">Some of this is my summary of the change rather than ' +
+           'my own read-back of what you said — I did not write a sentence for it at the ' +
+           'time. It is still built from the changes themselves, but read it a little ' +
+           'more carefully than usual.</div>';
+    }
+    h += '<p class="rb-prose">' + parts.join(" ") + "</p>";
 
     h += evidenceHtml(s);
 
@@ -987,20 +1011,88 @@
              (busy ? "Applying…" : "Yes, apply " + (n === 1 ? "this one" : "these " + n)) +
              "</button>" +
              '<span class="rb-or">or leave them here and decide later</span></div>';
-      } else {
-        // REFUSAL S11-7 said as a sentence with a reason and a way forward,
-        // rather than a greyed-out button he would have to guess about.
+      } else if (g.blocked_reason === "new_record_needs_naming" ||
+                 g.blocked_reason === "would_create_record_from_closed_thread") {
+        // SESSION 12 (F2). Your decision of 1 August: a group's single yes can
+        // never create a record, and a record is created only by being asked
+        // for BY NAME, on its own. So this is no longer a dead end with an
+        // apology in it — it is the question itself, one button per record,
+        // each naming exactly what it would add.
+        //
+        // `records_to_name` is computed by chat_backlog_groups from the same
+        // predicate chat_apply_set refuses on, so this card cannot offer a
+        // name the database would reject, and cannot omit one it needs.
+        // DEPLOY-ORDER SAFETY. `records_to_name` only exists once
+        // sql/phase12_findings.sql is applied. If this page is live first —
+        // which is the SAFE order, because it degrades and the reverse does
+        // not — there is nothing to name, and the honest thing is the old
+        // sentence rather than "0 of these are about records you do not have".
+        var wanted = g.records_to_name || [];
+        if (!wanted.length) {
+          h += '<div class="grp-held">One of these would create a record you do not have yet, ' +
+               "and I will not add a record from a list — there would be no sentence of yours " +
+               "behind it. Tell me about them in a message and I will add them properly.</div>";
+          if (groupErr[g.conversation_id])
+            h += '<div class="grp-err">' + escapeHtml(groupErr[g.conversation_id]) + "</div>";
+          return h + "</div>";
+        }
         h += '<div class="grp-held">' +
-             (g.blocked_reason === "would_create_record_from_closed_thread"
-               ? "One of these would create a record you do not have yet, and I will not " +
-                 "add a record from a list — there would be no sentence of yours behind it. " +
-                 "Tell me about them in a message and I will add them properly."
+             (wanted.length === 1
+               ? "One of these is about a record you do not have yet. "
+               : String(wanted.length) + " of these are about records you do not have yet. ") +
+             "I will not add a record as a side effect of approving a list — " +
+             "so name it first, and then the rest of this group can go through." +
+             "</div>";
+        h += '<div class="grp-actions">';
+        for (var wi = 0; wi < wanted.length; wi++) {
+          var wn = String(wanted[wi].name || ""), wt = String(wanted[wi].entity_type || "partner");
+          var wkey = g.conversation_id + "|" + wn + "|" + wt;
+          h += '<button class="btn-yes" data-act="addrec" data-id="' +
+               escapeHtml(g.conversation_id) + '" data-name="' + escapeHtml(wn) +
+               '" data-type="' + escapeHtml(wt) + '" ' + (nameBusy[wkey] ? "disabled" : "") + ">" +
+               (nameBusy[wkey] ? "Adding…" : "Add " + escapeHtml(wn) + " as a new " + escapeHtml(wt)) +
+               "</button>";
+        }
+        h += '<span class="rb-or">or leave it and tell me about them in a message</span></div>';
+      } else {
+        h += '<div class="grp-held">' +
+             (g.blocked_reason === "item_not_applicable"
+               ? "One of these does not say clearly enough what it attaches to, or has " +
+                 "nothing recorded I could show you, so I will not apply it unread."
                : "I cannot decide this one here.") +
              "</div>";
       }
       if (groupErr[g.conversation_id])
         h += '<div class="grp-err">' + escapeHtml(groupErr[g.conversation_id]) + "</div>";
       return h + "</div>";
+    }).join("") + heldThreadsHtml();
+  }
+
+  // SESSION 12 (F7). A thread that is holding something you told it does not
+  // close when its last item is decided — closing would strand the fact, which
+  // is the failure this project has now removed twice. The consequence is a
+  // thread with nothing pending and something held, and it appears in no group,
+  // because groups are built from pending items.
+  //
+  // So it is shown here. Stranding a preserved fact is better than destroying
+  // it and still not good enough.
+  function heldThreadsHtml() {
+    if (!heldThreads.length) return "";
+    return heldThreads.map(function (h) {
+      var facts = Array.isArray(h.facts) ? h.facts : [];
+      var s = '<div class="grp"><div class="grp-kind">Still held from ' +
+              escapeHtml(h.opened_on || "an earlier conversation") + "</div>";
+      s += '<div class="grp-recon">You told me ' +
+           (facts.length === 1 ? "this" : "these") +
+           ", and nothing has been proposed for " + (facts.length === 1 ? "it" : "them") +
+           " yet. It has not been lost, and it has not been applied.</div>";
+      s += "<ul>" + facts.map(function (f) {
+             return "<li>" + escapeHtml(String(f)) + "</li>";
+           }).join("") + "</ul>";
+      s += '<div class="grp-held">Re-opening an older conversation is not built yet. ' +
+           "If you want me to act on " + (facts.length === 1 ? "it" : "these") +
+           ", say it again in the box below and I will pick it up properly.</div>";
+      return s + "</div>";
     }).join("");
   }
 
@@ -1011,8 +1103,12 @@
     return rpc("chat_backlog_groups", {}).then(function (d) {
       var all = (d && d.ok === true && Array.isArray(d.groups)) ? d.groups : [];
       groups = only ? all.filter(function (g) { return only[g.conversation_id]; }) : all;
-      return groups.length;
-    }).catch(function () { groups = []; return 0; });
+      // SESSION 12 (F7/F8). The thread on screen is excluded by the function
+      // itself, computed the way chat_load_open picks it, so this page never
+      // has to pass its own conversation id and never has to be trusted to.
+      heldThreads = (d && d.ok === true && Array.isArray(d.held_threads)) ? d.held_threads : [];
+      return groups.length + heldThreads.length;
+    }).catch(function () { groups = []; heldThreads = []; return 0; });
   }
 
   // REFUSAL S11-9. This is the ordinary apply path — the same function, the
@@ -1063,6 +1159,14 @@
   // surface cannot explain is the same as a silent one to the person reading it.
   function explainGroup(d) {
     var e = d && d.error;
+    if (e === "new_record_needs_naming") {
+      var toName = (d.names || []).join(", ");
+      return "Nothing was changed. " +
+             (toName ? toName + " " + ((d.names || []).length === 1 ? "is" : "are") + " not in your records yet"
+                     : "One of these is about a record you do not have yet") +
+             ", and I will not add a record as a side effect of approving a list. " +
+             "Name it with the button above and the rest will go through.";
+    }
     if (e === "new_record_from_closed_thread") {
       var names = (d.names || []).join(", ");
       return "Nothing was changed. " + (names ? names + " would have to be created" : "One of these would create a record") +
@@ -1082,6 +1186,63 @@
     if (typeof d === "object" && d && typeof d.integrity === "string" && d.integrity !== "ok")
       return "Nothing was changed — the change did not land where it was meant to, so the whole set was rolled back.";
     return "Nothing was changed. (" + (e || "unknown") + ")";
+  }
+
+  // SESSION 12 (F2). The second yes, and the only route by which a record is
+  // created from a list. chat_create_record takes the NAME and the TYPE, and
+  // refuses a name the model did not propose in that conversation — so this
+  // button cannot invent a record, only answer one the conversation raised.
+  //
+  // It creates the record and NOTHING else (S12-4): every pending item stays
+  // pending, no approval row is written, nothing is applied. He still has to
+  // press the group's yes afterwards. Two yeses, not one.
+  function nameRecord(convIdOfGroup, name, type) {
+    var key = convIdOfGroup + "|" + name + "|" + type;
+    if (nameBusy[key]) return;
+    delete groupErr[convIdOfGroup];
+    nameBusy[key] = true;
+    renderStream(false, true);
+
+    return rpc("chat_create_record", {
+      p_conversation_id: convIdOfGroup,
+      p_entity_name: name,
+      p_entity_type: type
+    }).then(function (d) {
+      nameBusy[key] = false;
+      if (d && d.ok === true) {
+        recordsLoaded = false;
+        return loadGroups().then(function () {
+          systemNote("Added " + name + " as a new " + type +
+                     ". Nothing else was decided — the changes are still waiting on you.");
+          renderStream(false, true);
+        });
+      }
+      groupErr[convIdOfGroup] = explainName(d, name);
+      renderStream(false, true);
+    }).catch(function (err) {
+      nameBusy[key] = false;
+      if (err && /session_expired|not_signed_in/.test(err.message)) { sessionDead(); return; }
+      groupErr[convIdOfGroup] = "Could not reach the server. " + name + " was not added.";
+      renderStream(false, true);
+    });
+  }
+
+  // Every refusal chat_create_record can return, said in words.
+  function explainName(d, name) {
+    var e = d && d.error;
+    if (e === "already_exists")
+      return name + " is already in your records, so nothing was added. Try the group again.";
+    if (e === "not_proposed")
+      return "I will not add " + name + " here, because it was not one of the records this " +
+             "conversation proposed. Tell me about them in a message instead.";
+    if (e === "new_record_from_closed_thread")
+      return name + " was proposed in a conversation that has since closed, so there is no " +
+             "sentence of yours left for me to attach it to. Tell me about them in a message.";
+    if (e === "bad_type")
+      return "I do not know what kind of record " + name + " should be, so nothing was added.";
+    if (e === "no_name")
+      return "That record has no name recorded, so there is nothing I could add.";
+    return name + " was not added. (" + (e || "unknown") + ")";
   }
 
   function renderStream(pending, keepScroll) {
@@ -1776,6 +1937,8 @@
     else if (act === "approve") decide(id, "approve");
     else if (act === "reject")  decide(id, "reject");
     else if (act === "group")   decideGroup(id);
+    else if (act === "addrec")  nameRecord(id, b.getAttribute("data-name"),
+                                               b.getAttribute("data-type"));
   });
 
   // R5, at the surface as well as in the database: an empty box cannot be sent.
