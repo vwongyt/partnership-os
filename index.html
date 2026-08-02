@@ -986,7 +986,13 @@
   // rows, so neither can be forgotten by a rendering change.
   // ---------------------------------------------------------------------------
   function groupsHtml() {
-    if (!groups.length) return "";
+    // SESSION 12, 2 AUGUST. This read `if (!groups.length) return ""` — which
+    // returned BEFORE heldThreadsHtml() was ever reached. Groups are built from
+    // PENDING items; a thread that is merely holding a fact has none. So the
+    // one card that exists to stop a fact being stranded was invisible in
+    // exactly the situation it exists for: everything decided, one fact left
+    // over. Found by rendering the page's own output rather than reading it.
+    if (!groups.length && !heldThreads.length) return "";
     return groups.map(function (g) {
       var busy = groupBusy[g.conversation_id];
       var h = '<div class="grp' + (busy ? " busy" : "") + '">';
