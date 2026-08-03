@@ -622,22 +622,11 @@
     return c.resolved_object_name || c.entity_name || "an unnamed record";
   }
 
-  // SESSION 12 (F-11). A change that ADDS a field the record has never had says
-  // so, everywhere the change is described. On 2 August a deal was proposed to
-  // be marked won on a field called `stage`, beside a real field called
-  // `status` — which would have left it won on one and open on the other, with
-  // nothing on screen to notice. Creating a field is legitimate (his renewal
-  // date on the same afternoon was exactly that); creating one INVISIBLY is not.
-  function addsNewField(c) {
-    return c.type === "property_update" && c.field_is_new === true;
-  }
-
   function whatLine(c) {
     var ch = c.change || {};
     if (c.type === "note") return "Add a note to " + targetName(c);
     if (c.type === "property_update")
-      return (addsNewField(c) ? "Add a new field " : "Set ") +
-             titleCase(ch.field) + " to “" + (ch.to == null ? "" : ch.to) + "”";
+      return "Set " + titleCase(ch.field) + " to “" + (ch.to == null ? "" : ch.to) + "”";
     if (c.type === "task") return "Create a task — " + (ch.title || c.summary || "");
     return c.summary || c.type;
   }
@@ -646,8 +635,6 @@
     var ch = c.change || {}, bits = [];
     if (c.type === "note") return ch.note_text || "";
     if (c.type === "property_update") {
-      if (addsNewField(c))
-        return "This record has no " + titleCase(ch.field) + " today — approving adds it.";
       if (ch.from != null && ch.from !== "") return "Currently “" + ch.from + "”.";
       return "";
     }
@@ -731,77 +718,16 @@
   // of that decision is this check: the paragraph must NAME the record and say
   // it is new. If a clause for a new record does not name it, the yes is not
   // offered at all. Asking dishonestly is worse than not asking.
-  //
-  // SESSION 12 (F-5). The unit this guard tests is the PARAGRAPH, because the
-  // paragraph is what he reads. He is shown one assembled block of prose, not a
-  // list of sentences, so a record named once anywhere in it has been named to
-  // him — and a second clause about that same record no longer has to repeat
-  // the name, any more than a person would. Testing each clause ALONE withheld
-  // the yes from a paragraph that did name every new record, and then told him
-  // "the summary above does not say so", which was false. The guarantee is
-  // unchanged: nothing gets created without being named in what he read. Only
-  // the unit was wrong.
-  function paragraphText() {
-    var s = setCards(), i, t, out = [];
-    for (i = 0; i < s.length; i++) { t = clauseOf(s[i]); if (t) out.push(t); }
-    return out.join(" ");
-  }
   function newRecordsUnnamed() {
-    var out = [], seen = {}, s = setCards(), i, c, nm, key;
-    var para = paragraphText().toLowerCase();
+    var out = [], s = setCards(), i, c, nm;
     for (i = 0; i < s.length; i++) {
       c = s[i];
       if (c.resolved_object_id) continue;
       nm = String(c.entity_name || "").trim();
-      // No name at all is a different failure and still stops the yes: there is
-      // nothing that COULD have been named.
-      if (!nm) {
-        if (!seen["k:\u0000"]) { seen["k:\u0000"] = 1; out.push("an unnamed record"); }
-        continue;
-      }
-      key = nm.toLowerCase();
-      if (seen["k:" + key]) continue;
-      if (para.indexOf(key) === -1) { seen["k:" + key] = 1; out.push(nm); }
+      if (!nm) { out.push("an unnamed record"); continue; }
+      if (clauseOf(c).toLowerCase().indexOf(nm.toLowerCase()) === -1) out.push(nm);
     }
     return out;
-  }
-
-  // SESSION 12 (F-8). A clause whose name more than one record answers to.
-  // Read from `candidates` rather than from the `ambiguous` label, because the
-  // candidates are what makes the choice answerable: a card claiming to be
-  // ambiguous with nothing to choose between would be F9's defect again, and
-  // this way that card simply is not one.
-  function candidatesOf(c) {
-    return (c && Array.isArray(c.candidates)) ? c.candidates : [];
-  }
-  function ambiguousCards() {
-    return setCards().filter(function (c) {
-      return !c.resolved_object_id && candidatesOf(c).length > 1;
-    });
-  }
-
-  // One button per record, each saying what it belongs to. The two words are
-  // identical — the parent is the only thing that tells them apart, which is
-  // exactly what F9 established for reading and this is for writing.
-  function pickHtml(c) {
-    var cs = candidatesOf(c), i, x;
-    var h = '<div class="q" data-card="' + escapeHtml(c.id) + '">' +
-            '<div class="q-kind">Which one?</div>' +
-            "<h3>" + escapeHtml(clauseOf(c)) + "</h3>" +
-            '<p class="q-why">You have ' + cs.length + ' records called <b>' +
-            escapeHtml(String(c.entity_name || "")) + "</b>. I will not pick for you — " +
-            "whichever I chose would be a guess about your business that you could not see.</p>";
-    h += '<div class="q-actions">';
-    for (i = 0; i < cs.length; i++) {
-      x = cs[i];
-      h += '<button class="btn-approve" data-act="pick" data-id="' + escapeHtml(c.id) +
-           '" data-target="' + escapeHtml(String(x.id)) + '">Yes — the one under ' +
-           escapeHtml(String(x.belongs_to || "nothing")) + "</button>";
-    }
-    h += '<button class="btn-reject" data-act="reject" data-id="' + escapeHtml(c.id) +
-         '">Neither — drop it</button></div>';
-    if (cardError[c.id]) h += '<div class="prop-err">' + escapeHtml(cardError[c.id]) + "</div>";
-    return h + "</div>";
   }
 
   function paragraphHtml() {
@@ -826,42 +752,12 @@
            'time. It is still built from the changes themselves, but read it a little ' +
            'more carefully than usual.</div>';
     }
-    // F-11, in words, every time it is true. The clause the model wrote will
-    // usually not mention that a field is new, because the model does not
-    // reliably know; the row does, so the page says it from the row.
-    var newFields = [];
-    for (i = 0; i < s.length; i++)
-      if (addsNewField(s[i]) && s[i].change && s[i].change.field)
-        newFields.push(titleCase(s[i].change.field) + " on " + targetName(s[i]));
-    if (newFields.length) {
-      var marked = [];
-      for (i = 0; i < newFields.length; i++) marked.push("<b>" + escapeHtml(newFields[i]) + "</b>");
-      h += '<div class="grp-recon">' +
-           (newFields.length === 1
-              ? "One of these adds a field the record has never had — "
-              : "Some of these add fields the records have never had — ") +
-           marked.join(", ") +
-           ". That is allowed and sometimes right, but it is worth a second look: a value on a new " +
-           "field sits <i>beside</i> the record\u2019s existing ones rather than replacing any of them." +
-           "</div>";
-    }
     h += '<p class="rb-prose">' + parts.join(" ") + "</p>";
 
     h += evidenceHtml(s);
 
     var missing = newRecordsUnnamed();
-    var amb = ambiguousCards();
-    if (amb.length) {
-      // SESSION 12 (F-8). The set cannot be approved while one of its clauses
-      // is about a name more than one of his records answers to, and the
-      // database refuses it in the same statement as the write. Asking for a
-      // yes the function will reject would be F2's defect again, so the yes is
-      // not offered — and, unlike a bare refusal, the choice is right here.
-      h += '<div class="rb-err">One of these is about a name <b>two of your records answer ' +
-           'to</b>, and I am not going to guess which you meant — so nothing here can be ' +
-           'approved until you tell me. Pick below and I will ask you about the rest.</div>';
-      for (i = 0; i < amb.length; i++) h += pickHtml(amb[i]);
-    } else if (missing.length) {
+    if (missing.length) {
       h += '<div class="rb-err">I am not going to ask you to approve this as it stands. ' +
            escapeHtml(missing.join(", ")) +
            (missing.length === 1 ? " is not in your records" : " are not in your records") +
@@ -1174,33 +1070,6 @@
                "</button>";
         }
         h += '<span class="rb-or">or leave it and tell me about them in a message</span></div>';
-      } else if (g.blocked_reason === "record_is_ambiguous") {
-        // SESSION 12 (F-8). The same choice the conversation offers, offered
-        // here, because a backlog group that only said "I cannot decide this
-        // one here" would be a dead end again — the thing S12-3 fixed for
-        // naming and never had to fix for this, because this refusal did not
-        // exist. `records_to_disambiguate` comes from the same predicate
-        // chat_apply_set refuses on.
-        var dis = g.records_to_disambiguate || [];
-        h += '<div class="grp-held">' +
-             (dis.length === 1
-               ? "One of these is about a name more than one of your records answers to. "
-               : String(dis.length) + " of these are about names more than one of your records " +
-                 "answers to. ") +
-             "I will not pick for you — whichever I chose would be a guess about your business " +
-             "you could not see.</div>";
-        for (var di = 0; di < dis.length; di++) {
-          var dcs = (dis[di].candidates || []);
-          h += '<div class="grp-actions">';
-          for (var dj = 0; dj < dcs.length; dj++) {
-            h += '<button class="btn-approve" data-act="pick" data-id="' +
-                 escapeHtml(String(dis[di].record_update_id)) + '" data-target="' +
-                 escapeHtml(String(dcs[dj].id)) + '">' +
-                 escapeHtml(String(dis[di].name || "")) + " — the one under " +
-                 escapeHtml(String(dcs[dj].belongs_to || "nothing")) + "</button>";
-          }
-          h += "</div>";
-        }
       } else {
         h += '<div class="grp-held">' +
              (g.blocked_reason === "item_not_applicable"
@@ -1764,6 +1633,14 @@
           if (d.assistant_message) turns.push(d.assistant_message);
           else if (d.reply) turns.push({ role: "assistant", content: d.reply,
                                          created_at: new Date().toISOString() });
+          // SESSION 14 (S14-12). A question asked while a set is waiting is now
+          // answered from his records instead of bounced, and the Edge Function
+          // returns the SAME structured answer branch A returns - so it is
+          // drawn the same way here. Without this line the answer arrives and
+          // the page silently renders only its flat text: the second site of a
+          // rule that was present at the first, which is this project's
+          // signature defect and the reason both are changed in one commit.
+          if (d.answer) answerFor[turns.length - 1] = d.answer;
           // The fresh set, read back from the database. The paragraph is
           // rebuilt from it - never patched.
           if (Array.isArray(d.record_updates) && d.record_updates.length) cards = d.record_updates;
@@ -1794,30 +1671,9 @@
   // are the per-item functions from Session 6, unchanged: approving changes a
   // record and writes an event, rejecting changes nothing and deliberately
   // writes no event.
-  // `chosenTarget` is only ever passed by the F-8 chooser, and only ever an id
-  // the database itself handed back as a candidate — chat_apply_record_update
-  // refuses any other (S12-34), so a tampered button changes nothing.
-  // Which backlog group an item belongs to, so a refusal is drawn on the card
-  // it came from rather than nowhere.
-  function findGroupOf(itemId) {
-    var i, j, items;
-    for (i = 0; i < groups.length; i++) {
-      items = groups[i].records_to_disambiguate || [];
-      for (j = 0; j < items.length; j++)
-        if (String(items[j].record_update_id) === String(itemId))
-          return groups[i].conversation_id;
-    }
-    return "";
-  }
-
-  function decide(id, mode, chosenTarget) {
+  function decide(id, mode) {
     var c = findCard(id);
-    // The F-8 chooser also appears on BACKLOG groups, whose items are not in
-    // `cards` at all — so a missing card is normal there and must not silently
-    // do nothing. Everything below that touches `c` is guarded, and the
-    // backlog case re-reads the list afterwards rather than patching it.
-    var fromBacklog = !c;
-    if (!c && !chosenTarget) return;
+    if (!c) return;
     delete cardError[id];
     var fn, args;
     if (mode === "reject") {
@@ -1826,24 +1682,18 @@
     } else {
       fn = "chat_apply_record_update";
       args = { p_record_update_id: id, p_final_change: null,
-               p_target_object_id: chosenTarget || targetFor(c), p_edits: null };
+               p_target_object_id: targetFor(c), p_edits: null };
     }
     setCardBusy(id, true);
     return rpc(fn, args).then(function (d) {
       setCardBusy(id, false);
       if (d && d.ok === true) {
-        if (c) c.status = mode === "reject" ? "rejected" : "applied";
+        c.status = mode === "reject" ? "rejected" : "applied";
         if (mode !== "reject") recordsLoaded = false;
-        if (d.thread_closed && c) { closedNotice = true; setState("closed", true); }
-        if (fromBacklog) {
-          // S11-8: after a write, ask the database again rather than crossing
-          // the item off a list that was true when the page loaded.
-          return loadGroups().then(function () { renderStream(false, true); return true; });
-        }
+        if (d.thread_closed) { closedNotice = true; setState("closed", true); }
         renderStream(false, true);
         return true;
       }
-      if (fromBacklog) groupErr[findGroupOf(id)] = explainDecision(d);
       cardError[id] = explainDecision(d);
       renderStream(false, true);
       return false;
@@ -1874,14 +1724,6 @@
     if (e === "unresolved_entity")
       return "One of those changes is not attached to any record, so applying it would change " +
              "nothing. None of the set was applied.";
-    // SESSION 12 (F-8). Should be unreachable from this page, because the yes
-    // is not offered while anything is ambiguous — kept because "unreachable"
-    // is a claim about the page, and the refusal is a fact about the database.
-    if (e === "record_is_ambiguous")
-      return "One of those changes names something more than one of your records answers to (" +
-             escapeHtml(((d && d.names) || []).join(", ")) + "), and I will not guess which you " +
-             "meant. None of the set was applied and nothing was changed. Reload and I will ask " +
-             "you which one.";
     if (e === "nothing_pending")
       return "There was nothing still waiting on a decision, so nothing was applied a second time.";
     if (e === "no_workspace")
@@ -2121,7 +1963,6 @@
     else if (act === "group")   decideGroup(id);
     else if (act === "addrec")  nameRecord(id, b.getAttribute("data-name"),
                                                b.getAttribute("data-type"));
-    else if (act === "pick")    decide(id, "approve", b.getAttribute("data-target"));
   });
 
   // R5, at the surface as well as in the database: an empty box cannot be sent.
